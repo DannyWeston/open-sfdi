@@ -1,6 +1,6 @@
 # Custom paths to not include
 
-.data/
+data/
 
 
 
