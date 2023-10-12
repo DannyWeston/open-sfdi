@@ -15,30 +15,29 @@ f = [0, 0.2]
 
 # Demodulation (array input)
 def AC(var: list):
-    return ((2) ** (1 / 2) / 3) * (((var[0] - var[1]) ** 2 + (var[1] - var[2]) ** 2 + (var[2] - var[0]) ** 2) ** (1 / 2))
+    return (2 ** 0.5 / 3) * (((var[0] - var[1]) ** 2 + (var[1] - var[2]) ** 2 + (var[2] - var[0]) ** 2) ** 0.5)
 
 def DC(var: list):
     return (1 / 3) * (var[0] + var[1] + var[2])
 
-####################REFERENCE PHANTOM OPTICAL PROPERTIES###########################
+#################### REFERENCE PHANTOM OPTICAL PROPERTIES ###########################
 mu_a = 0.018
 mu_sp = 0.77
-n = 1.43 #refractive index of tissue 
+n = 1.43 #refractive index of tissue
 ###################################################################################
-
 
 #AC diffuse reflectance from Diffusion Approximation
 R_eff = 0.0636 * n + 0.668 + 0.710 / n - 1.44 / (n ** 2)
 A = (1 - R_eff) / (2 * (1 + R_eff))
-mu_tr = mu_a + mu_sp
+mu_tr = mu_sp + mu_a
 ap = mu_sp / mu_tr
 
-def mu_eff(mu_a, mu_tr, ac=False):
-    return mu_tr * (3 * (mu_a / mu_tr) + ((2 * np.pi * f[0] if ac else f[1]) ** 2) / mu_tr ** 2) ** 0.5
-
+def mu_eff(mu_a, mu_tr, f):
+    a = (2 * np.pi * f) ** 2
+    return mu_tr * (3 * (mu_a / mu_tr) + a / mu_tr ** 2) ** 0.5
 
 def diffusion_approximation():
-    #AC diffuse reflectance from Diffusion Approximation
+    # AC diffuse reflectance from Diffusion Approximation
     R_eff = 0.0636 * n + 0.668 + 0.710 / n - 1.44 / (n ** 2)
     A = (1 - R_eff) / (2 * (1 + R_eff))
     mu_tr = mu_a + mu_sp
@@ -58,24 +57,12 @@ class Experiment:
 
         self.camera = Camera(camera)
 
-        self.camera.show_raw_feed()
-
         self.debug = debug
 
     def run(self, run_id):
         self.logger.info(f'Starting run {run_id + 1}')
 
-        imgs = []
-        ref_imgs = []
-
-        # Try and load the projector images, 3 phrases
-        for proj_img in self.proj_imgs:
-            img = self.__load_img(proj_img)
-
-            if self.img_func: img = self.img_func(img) # Apply some filtering to image if valid
-            
-            imgs.append(img)
-            ref_imgs.append(img)
+        imgs, ref_imgs = self.load_images()
 
         std_dev = 3
 
@@ -99,12 +86,11 @@ class Experiment:
                 freq = [R_d_DC2[i][j], R_d_AC2[i][j]]
                 xi.append(freq)
 
-                
         #Getting array of reflectance values and corresponding optical properties
         mu_a = np.arange(0, 0.5, 0.001) # We are setting the absorption coefficient range
-        mu_sp = np.arange(0.1, 5, 0.01) 
+        mu_sp = np.arange(0.1, 5, 0.01)
 
-        n = 1.43 #refractive index of tissue 
+        n = 1.43 #refractive index of tissue
 
         # THE DIFFUSION APPROXIMATION
         # Getting the diffuse reflectance AC values corresponding to specific absorption and reduced scattering coefficients
@@ -118,16 +104,16 @@ class Experiment:
                 A = (1 - R_eff) / (2 * (1 + R_eff))
                 mu_tr = mu_a[i] + mu_sp[j]
                 ap = mu_sp[j] / mu_tr
-                mu_effp_AC = mu_tr * (3 * (mu_a[i] / mu_tr) + ((2 * np.pi * f[1]) ** 2) / mu_tr ** 2) ** 0.5
-                R_d1 = (3 * A * ap) / (((mu_effp_AC / mu_tr) + 1) * ((mu_effp_AC / mu_tr) + 3 * A))
-                Reflectance_AC.append(R_d1)
-                
-                mu_effp_DC = mu_eff()
-                R_d2 = (3 * A * ap) / (((mu_effp_DC / mu_tr) + 1) * ((mu_effp_DC / mu_tr) + 3 * A))
-                Reflectance_DC.append(R_d2)
-                        
+
+                g = lambda mu_effp: (3 * A * ap) / (((mu_effp / mu_tr) + 1) * ((mu_effp / mu_tr) + 3 * A)) 
+
+                ac = mu_eff(mu_a[i], mu_tr, f[1])
+                dc = mu_eff(mu_a[i], mu_tr, f[0])
+
+                Reflectance_AC.append(g(ac))
+                Reflectance_DC.append(g(dc))
+
                 op_mua.append(mu_a[i])
-                
                 op_sp.append(mu_sp[j])
 
         #putting the DC and AC diffuse reflectance values generated from the Diffusion Approximation into an array    
@@ -150,12 +136,31 @@ class Experiment:
         abs_plot = np.reshape(coeff_abs, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
         sct_plot = np.reshape(coeff_sct, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
 
-        print("Absorption : ", np.nanmean(abs_plot))
-        print("Absorption std: ", np.std(abs_plot))
-        print("Scattering: ", np.nanmean(sct_plot))
-        print("Scattering std: ", np.std(sct_plot))
-    
+        self.logger.info(f'Absorption: {np.nanmean(abs_plot)}')
+        self.logger.info(f'Deviation std: {np.std(abs_plot)}')
+
+        self.logger.info(f'Scattering: {np.nanmean(sct_plot)}')
+        self.logger.info(f'Scattering std: {np.std(sct_plot)}')
         self.logger.info(f'Completed run {run_id + 1}')
+
+    def load_images(self):
+        imgs = []
+        ref_imgs = []
+
+        img_paths = self.proj_imgs[:3]
+        ref_img_paths = self.proj_imgs[3:]
+
+        for path in img_paths:
+            img = self.__load_img(path)
+            if self.img_func: img = self.img_func(img) # Apply some filtering to image if valid
+            imgs.append(img)
+
+        for path in ref_img_paths:
+            ref_img = self.__load_img(path)
+            if self.img_func: ref_img = self.img_func(ref_img) # Apply some filtering to image if valid
+            ref_imgs.append(ref_img)
+
+        return imgs, ref_imgs
 
     def __load_img(self, path):
         img = cv2.imread(path, 1)

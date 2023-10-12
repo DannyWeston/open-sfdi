@@ -14,9 +14,9 @@ from experiment import Experiment
 def main():
     args = handle_args()
 
-    #img_func = lambda img: img[:, :, 2] # Only keep red channel in images
+    img_func = lambda img: img[:, :, 2] # Only keep red channel in images
 
-    p = Experiment(args["proj_imgs"], args["camera"])
+    p = Experiment(args["proj_imgs"], args["camera"], img_func=img_func, debug=args["debug"])
 
     for i in range(args["runs"]):
         p.run(i)

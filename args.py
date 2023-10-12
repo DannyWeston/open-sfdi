@@ -1,13 +1,11 @@
-import argparse
-
-import os
+import argparse, os
 
 def handle_args():
     parser = argparse.ArgumentParser()
 
     #parser.add_argument("--proj_imgs", help="Path to the images for the projector to display")
-    parser.add_argument("--proj_imgs", nargs='+', type=str, required=True,
-        default=[f'.\\data\\default{i}' for i in range(3)],
+    parser.add_argument("--proj_imgs", nargs='+', type=str,
+        default=[f'{os.getcwd()}/data/test_a{i +1}.jpg' for i in range(3)] + [f'{os.getcwd()}/data/test_b{i + 1}.jpg' for i in range(3)],
         help="Path to the three images for the projector to display")
 
     parser.add_argument("--runs", type=int, default=1,
