@@ -1,4 +1,5 @@
 import os, sys, logging
+
 logging.basicConfig(
     level = logging.INFO, 
     format="[%(levelname)s %(asctime)s] %(message)s"
@@ -16,7 +17,7 @@ def main():
 
     img_func = lambda img: img[:, :, 2] # Only keep red channel in images
 
-    p = Experiment(args["proj_imgs"], args["camera"], img_func=img_func, debug=args["debug"])
+    p = Experiment(args, img_func=img_func)
 
     for i in range(args["runs"]):
         p.run(i)

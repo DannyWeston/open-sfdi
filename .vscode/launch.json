@@ -5,7 +5,16 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "DEBUG sfdi-benchtop",
+            "type": "python",
+            "request": "launch",
+            "program": "sfdi-benchtop.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": ["--debug=True"]
+        },
+        {
+            "name": "sfdi-benchtop",
             "type": "python",
             "request": "launch",
             "program": "sfdi-benchtop.py",

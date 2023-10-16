@@ -19,6 +19,15 @@ def handle_args():
     
     parser.add_argument("--interactive", type=bool, default=False,
         help="Toggle interactive console mode (will ignore runs flag)")
+    
+    parser.add_argument("--refr_index", type=float, default=1.43,
+        help="Refractive index to use")
+    
+    parser.add_argument("--mu_a", type=float, default=0.018,
+        help="TODO: Write help")
+    
+    parser.add_argument("--mu_sp", type=float, default=0.77,
+        help="TODO: Write help")
 
     args = vars(parser.parse_args())
 

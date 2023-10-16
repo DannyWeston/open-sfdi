@@ -9,58 +9,42 @@ from scipy import ndimage, misc
 import pandas as pd
 import logging
 
+from time import perf_counter
+
+from maths import *
 from camera import Camera
 
 f = [0, 0.2]
 
-# Demodulation (array input)
-def AC(var: list):
-    return (2 ** 0.5 / 3) * (((var[0] - var[1]) ** 2 + (var[1] - var[2]) ** 2 + (var[2] - var[0]) ** 2) ** 0.5)
-
-def DC(var: list):
-    return (1 / 3) * (var[0] + var[1] + var[2])
-
-#################### REFERENCE PHANTOM OPTICAL PROPERTIES ###########################
-mu_a = 0.018
-mu_sp = 0.77
-n = 1.43 #refractive index of tissue
-###################################################################################
-
-#AC diffuse reflectance from Diffusion Approximation
-R_eff = 0.0636 * n + 0.668 + 0.710 / n - 1.44 / (n ** 2)
-A = (1 - R_eff) / (2 * (1 + R_eff))
-mu_tr = mu_sp + mu_a
-ap = mu_sp / mu_tr
-
-def mu_eff(mu_a, mu_tr, f):
-    a = (2 * np.pi * f) ** 2
-    return mu_tr * (3 * (mu_a / mu_tr) + a / mu_tr ** 2) ** 0.5
-
-def diffusion_approximation():
-    # AC diffuse reflectance from Diffusion Approximation
-    R_eff = 0.0636 * n + 0.668 + 0.710 / n - 1.44 / (n ** 2)
-    A = (1 - R_eff) / (2 * (1 + R_eff))
-    mu_tr = mu_a + mu_sp
-    ap = mu_sp / mu_tr
-
-    r_ac = (3 * A * ap)/(((2 * np.pi * f[1]) / mu_tr) ** 2 + ((2 * np.pi * f[1]) / mu_tr) * (1 + 3 * A) + 3 * A)
-    r_dc = (3 * A * ap) / (3 * (1 - ap) + (1 + 3 * A) * np.sqrt(3 * (1 - ap)) + 3 * A)
-
-    return r_ac, r_dc
-
 class Experiment:
-    def __init__(self, proj_imgs, camera, img_func = None, debug=False):
-        self.proj_imgs = proj_imgs
+    def __init__(self, args, img_func = None):
+        self.proj_imgs = args["proj_imgs"]      # Projection images to use
+        self.refr_index = args["refr_index"]    # Refractive index of material
+        self.debug = args["debug"]              # Debug mode
+
+        self.mu_a = args["mu_a"]                # Reference absorption coefficient
+        self.mu_sp = args["mu_sp"]              # Reference scattering coefficient
+
+        self.camera = Camera(args["camera"])
+
         self.img_func = img_func
+
+        if self.debug: self.start_time = None
 
         self.logger = logging.getLogger()
 
-        self.camera = Camera(camera)
-
-        self.debug = debug
-
     def run(self, run_id):
         self.logger.info(f'Starting run {run_id + 1}')
+
+        if self.debug:
+            self.start_time = perf_counter()
+
+        # Calculate some constants
+
+        R_eff = ac_diffuse(self.refr_index)
+        A = (1 - R_eff) / (2 * (1 + R_eff))
+        mu_tr = self.mu_sp + self.mu_a
+        ap = self.mu_sp / mu_tr
 
         imgs, ref_imgs = self.load_images()
 
@@ -73,7 +57,7 @@ class Experiment:
         imgs_dc = gaussian_filter(DC(imgs), std_dev)
 
         # Get AC/DC Reflectance values using diffusion approximation
-        r_ac, r_dc = diffusion_approximation()
+        r_ac, r_dc = diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
 
         R_d_AC2 = (imgs_ac / ref_imgs_ac) * r_ac
         R_d_DC2 = (imgs_dc / ref_imgs_dc) * r_dc
@@ -136,12 +120,18 @@ class Experiment:
         abs_plot = np.reshape(coeff_abs, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
         sct_plot = np.reshape(coeff_sct, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
 
+        if self.debug:
+            self.logger.info(f'Run took ')
+
         self.logger.info(f'Absorption: {np.nanmean(abs_plot)}')
         self.logger.info(f'Deviation std: {np.std(abs_plot)}')
 
         self.logger.info(f'Scattering: {np.nanmean(sct_plot)}')
         self.logger.info(f'Scattering std: {np.std(sct_plot)}')
-        self.logger.info(f'Completed run {run_id + 1}')
+
+        finish_time = perf_counter() - self.start_time
+
+        self.logger.info(f'Completed run {run_id + 1} in {finish_time:.2f} seconds')
 
     def load_images(self):
         imgs = []
@@ -164,8 +154,6 @@ class Experiment:
 
     def __load_img(self, path):
         img = cv2.imread(path, 1)
-
-        if self.debug: self.__display_img(img)
 
         return img.astype(np.double)
     
