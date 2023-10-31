@@ -23,7 +23,7 @@ def handle_args():
     parser.add_argument("--refr_index", type=float, default=1.43,
         help="Refractive index to use")
     
-    parser.add_argument("--output_dir", type=float, default='/home/admin/OPTIMlab-benchtop-sfdi/results',
+    parser.add_argument("--output_dir", type=str, default='/home/admin/OPTIMlab-benchtop-sfdi/results',
         help="Output directory to place results from an experiment (will create last directory if not present)")
     
     parser.add_argument("--mu_a", type=float, default=0.018,

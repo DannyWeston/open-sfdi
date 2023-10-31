@@ -120,9 +120,6 @@ class Experiment:
         abs_plot = np.reshape(coeff_abs, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
         sct_plot = np.reshape(coeff_sct, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
 
-        if self.debug:
-            self.logger.info(f'Run took ')
-
         self.logger.info(f'Absorption: {np.nanmean(abs_plot)}')
         self.logger.info(f'Deviation std: {np.std(abs_plot)}')
 
