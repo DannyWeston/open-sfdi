@@ -8,36 +8,69 @@ from scipy.interpolate import griddata
 from scipy import ndimage, misc
 import pandas as pd
 import logging
+import json
+import os
 
 from time import perf_counter
+from datetime import datetime
 
 from maths import *
 from camera import Camera
 
-f = [0, 0.2]
-
 class Experiment:
-    def __init__(self, args, img_func = None):
+    def __init__(self, args):
         self.proj_imgs = args["proj_imgs"]      # Projection images to use
         self.refr_index = args["refr_index"]    # Refractive index of material
-        self.debug = args["debug"]              # Debug mode
+        self.debug = args["debug"]              # Debug mode or not
+        
+        self.runs = args["runs"]                # How many runs to complete
+        
+        self.output_dir = os.path.join(args["output_dir"], datetime.now().strftime("%Y%m%d_%H%M%S"))
+
+        # Attempt to create results directory
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir, exist_ok=True)
+
+        elif 0 < len(os.listdir(self.output_dir)):
+            raise FileExistsError(f'Experiment results directory {self.output_dir} is not empty!')
 
         self.mu_a = args["mu_a"]                # Reference absorption coefficient
         self.mu_sp = args["mu_sp"]              # Reference scattering coefficient
 
         self.camera = Camera(args["camera"])
 
-        self.img_func = img_func
-
-        if self.debug: self.start_time = None
-
         self.logger = logging.getLogger()
 
-    def run(self, run_id):
-        self.logger.info(f'Starting run {run_id + 1}')
+    def start(self):
+        start_time = perf_counter()
 
-        if self.debug:
-            self.start_time = perf_counter()
+        successful = 0
+
+        # Iterate through the runs, storing the results where necessary
+
+        for i in range(1, self.runs + 1):
+            self.logger.info(f'Starting run {i}')
+
+            finish_time = perf_counter()
+
+            results = self.run()
+
+            finish_time = perf_counter() - finish_time
+
+            if results is None: continue
+
+            successful += 1
+            
+            self.logger.info(f'Run {i} completed in {finish_time:.2f} seconds')
+
+            self.save_results(results, self.output_dir, f'run{i}.json')
+
+        start_time = perf_counter() - start_time
+
+        self.logger.info(f'Experiment completed in {start_time:.2f} seconds ({successful}/{self.runs} successful)')
+
+    def run(self):
+        f = [0, 0.2]
 
         # Calculate some constants
 
@@ -120,15 +153,30 @@ class Experiment:
         abs_plot = np.reshape(coeff_abs, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
         sct_plot = np.reshape(coeff_sct, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
 
-        self.logger.info(f'Absorption: {np.nanmean(abs_plot)}')
-        self.logger.info(f'Deviation std: {np.std(abs_plot)}')
+        absorption = np.nanmean(abs_plot)
+        absorption_std = np.std(abs_plot)
 
-        self.logger.info(f'Scattering: {np.nanmean(sct_plot)}')
-        self.logger.info(f'Scattering std: {np.std(sct_plot)}')
+        scattering = np.nanmean(sct_plot)
+        scattering_std = np.std(sct_plot)
 
-        finish_time = perf_counter() - self.start_time
 
-        self.logger.info(f'Completed run {run_id + 1} in {finish_time:.2f} seconds')
+        self.logger.info(f'Absorption: {absorption}')
+        self.logger.info(f'Deviation std: {absorption_std}')
+
+        self.logger.info(f'Scattering: {scattering}')
+        self.logger.info(f'Scattering std: {scattering_std}')
+
+        return {
+            "absorption" : absorption,
+            "absorption_std_dev" : absorption_std,
+            "scattering" : scattering,
+            "scattering_std_dev" : scattering_std,
+        }
+
+    def save_results(self, results, dir, name):
+        with open(os.path.join(dir, name), 'w') as outfile:
+            json.dump(results, outfile, indent=4)
+            self.logger.info(f'Results saved as {name}')
 
     def load_images(self):
         imgs = []
@@ -139,16 +187,16 @@ class Experiment:
 
         for path in img_paths:
             img = cv2.imread(path, 1).astype(np.double)
-            if self.img_func: img = self.img_func(img) # Apply some filtering to image if valid
+            img = img[:, :, 2] # Only keep red channel in images
             imgs.append(img)
 
         for path in ref_img_paths:
             ref_img = cv2.imread(path, 1).astype(np.double)
-            if self.img_func: ref_img = self.img_func(ref_img) # Apply some filtering to image if valid
+            ref_img = ref_img[:, :, 2] # Only keep red channel in images
             ref_imgs.append(ref_img)
 
         return imgs, ref_imgs
-    
+
     def __display_img(self, img):
         cv2.namedWindow("main", cv2.WND_PROP_FULLSCREEN)          
         cv2.setWindowProperty("main", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)

@@ -11,7 +11,10 @@
             "program": "sfdi-benchtop.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["--debug=True"]
+            "args": [
+                "--debug=True",
+                "--output_dir=C:\\Users\\psydw2\\Documents\\Code\\OPTIMlab-benchtop-sfdi\\results"    
+            ]
         },
         {
             "name": "sfdi-benchtop",
@@ -19,7 +22,10 @@
             "request": "launch",
             "program": "sfdi-benchtop.py",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": true,
+            "args": [
+                "--output_dir=C:\\Users\\psydw2\\Documents\\Code\\OPTIMlab-benchtop-sfdi\\results"    
+            ]
         }
     ]
 }
