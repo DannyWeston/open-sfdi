@@ -100,7 +100,7 @@ class Experiment:
                 op_mua.append(mu_a[i])
                 op_sp.append(mu_sp[j])
 
-        #putting the DC and AC diffuse reflectance values generated from the Diffusion Approximation into an array    
+        # putting the DC and AC diffuse reflectance values generated from the Diffusion Approximation into an array    
         points = []
         for k in range(len(mu_a) * len(mu_sp)): 
             freq = [Reflectance_DC[k], Reflectance_AC[k]]
@@ -108,8 +108,8 @@ class Experiment:
 
         points_array = np.array(points)
         #putting the optical properties into two seperate arrays
-        op_mua_array = np.array(op_mua) #values1
-        op_sp_array = np.array(op_sp) #values2
+        op_mua_array = np.array(op_mua)
+        op_sp_array = np.array(op_sp)
 
         #using scipy.interpolate.griddata to perform cubic interpolation of diffuse reflectance values to match 
         #the generated diffuse reflectance values from image to calculated optical properties
@@ -141,21 +141,16 @@ class Experiment:
         ref_img_paths = self.proj_imgs[3:]
 
         for path in img_paths:
-            img = self.__load_img(path)
+            img = cv2.imread(path, 1).astype(np.double)
             if self.img_func: img = self.img_func(img) # Apply some filtering to image if valid
             imgs.append(img)
 
         for path in ref_img_paths:
-            ref_img = self.__load_img(path)
+            ref_img = cv2.imread(path, 1).astype(np.double)
             if self.img_func: ref_img = self.img_func(ref_img) # Apply some filtering to image if valid
             ref_imgs.append(ref_img)
 
         return imgs, ref_imgs
-
-    def __load_img(self, path):
-        img = cv2.imread(path, 1)
-
-        return img.astype(np.double)
     
     def __display_img(self, img):
         cv2.namedWindow("main", cv2.WND_PROP_FULLSCREEN)          

@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 import os, sys, logging
 
 logging.basicConfig(
@@ -14,6 +16,10 @@ from experiment import Experiment
 
 def main():
     args = handle_args()
+
+    # Attempt to use the results directory
+    if not os.path.exists(args["output_dir"]):
+        os.makedirs(args["output_dir"])
 
     img_func = lambda img: img[:, :, 2] # Only keep red channel in images
 
