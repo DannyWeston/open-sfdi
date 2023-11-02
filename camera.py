@@ -16,3 +16,12 @@ class Camera:
                 if cv2.waitKey(1) == 27: break  # esc to quit
 
         cv2.destroyAllWindows()
+
+    def take_image(self):
+        ret_val, img = self.camera.read()
+        if ret_val:
+            return img
+        
+        # Something is wrong
+        
+        return None

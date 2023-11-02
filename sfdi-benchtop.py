@@ -1,5 +1,9 @@
 #!/usr/bin/python3
 
+# Daniel Weston
+# psydw2@nottingham.ac.uk
+# OPTIMlab
+
 import os, sys, logging
 
 logging.basicConfig(
@@ -10,13 +14,13 @@ from args import handle_args
 
 from experiment import Experiment
 
-# Daniel Weston
-# psydw2@nottingham.ac.uk
-# OPTIMlab
+import utils
 
 def main():
     args = handle_args()
-    
+
+    print(utils.get_local_address())
+
     p = Experiment(args)
     p.start()
 

@@ -11,6 +11,8 @@ import logging
 import json
 import os
 
+from time import sleep
+
 from time import perf_counter
 from datetime import datetime
 
@@ -70,6 +72,11 @@ class Experiment:
         self.logger.info(f'Experiment completed in {start_time:.2f} seconds ({successful}/{self.runs} successful)')
 
     def run(self):
+        # Collect 3 images from the camera
+        # TODO: Add support for 3 =< images
+
+        imgs, ref_imgs = self.test_images()
+
         f = [0, 0.2]
 
         # Calculate some constants
@@ -79,9 +86,9 @@ class Experiment:
         mu_tr = self.mu_sp + self.mu_a
         ap = self.mu_sp / mu_tr
 
-        imgs, ref_imgs = self.load_images()
-
         std_dev = 3
+
+        # Apply some gaussian filtering
 
         ref_imgs_ac = gaussian_filter(AC(ref_imgs), std_dev)
         ref_imgs_dc = gaussian_filter(DC(ref_imgs), std_dev)
@@ -97,13 +104,13 @@ class Experiment:
 
         xi = []
         x, y = R_d_AC2.shape
-        #puts the DC and AC diffuse reflectance values into an array
+        # Put the DC and AC diffuse reflectance values into an array
         for i in range(x):
             for j in range(y):
                 freq = [R_d_DC2[i][j], R_d_AC2[i][j]]
                 xi.append(freq)
 
-        #Getting array of reflectance values and corresponding optical properties
+        # Get an array of reflectance values and corresponding optical properties
         mu_a = np.arange(0, 0.5, 0.001) # We are setting the absorption coefficient range
         mu_sp = np.arange(0.1, 5, 0.01)
 
@@ -178,7 +185,7 @@ class Experiment:
             json.dump(results, outfile, indent=4)
             self.logger.info(f'Results saved as {name}')
 
-    def load_images(self):
+    def test_images(self):
         imgs = []
         ref_imgs = []
 
@@ -197,9 +204,24 @@ class Experiment:
 
         return imgs, ref_imgs
 
-    def __display_img(self, img):
-        cv2.namedWindow("main", cv2.WND_PROP_FULLSCREEN)          
-        cv2.setWindowProperty("main", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-        cv2.imshow("main", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+    def collect_images(self, fringe_patterns):
+        imgs = []
+
+        for pattern in fringe_patterns:
+            cv2.namedWindow("main", cv2.WND_PROP_FULLSCREEN)          
+            cv2.setWindowProperty("main", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            cv2.imshow("main", pattern)
+
+            sleep(1) # Allow image warmup time
+
+            img = self.camera.take_image() # Take a picture
+
+            if not img:
+                self.logger.error("Could not take an image using the camera")
+                return None
+
+            img = img[:, :, 2] # Apply some post processing (only keep red channel)
+            
+            imgs.append(img)
+
+        return imgs
