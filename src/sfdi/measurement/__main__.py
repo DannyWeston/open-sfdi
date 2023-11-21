@@ -12,14 +12,10 @@ logging.basicConfig(
 )
 from args import handle_args
 
-from experiment import Experiment
-
-import utils
+from sfdi.measurement.experiment import Experiment
 
 def main():
     args = handle_args()
-
-    print(utils.get_local_address())
 
     p = Experiment(args)
     p.start()

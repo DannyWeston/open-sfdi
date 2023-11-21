@@ -1,12 +1,8 @@
 
 import numpy as np
-import matplotlib.pyplot as plt
 import cv2
-import scipy
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
-from scipy import ndimage, misc
-import pandas as pd
 import logging
 import json
 import os
@@ -16,8 +12,8 @@ from time import sleep
 from time import perf_counter
 from datetime import datetime
 
-from maths import *
-from camera import Camera
+from sfdi.utils import maths
+from sfdi.video import Camera
 
 class Experiment:
     def __init__(self, args):
@@ -39,7 +35,9 @@ class Experiment:
         self.mu_a = args["mu_a"]                # Reference absorption coefficient
         self.mu_sp = args["mu_sp"]              # Reference scattering coefficient
 
-        self.camera = Camera(args["camera"])
+        self.camera_path = args["camera"]
+
+        self.camera = Camera()
 
         self.logger = logging.getLogger()
 
@@ -55,7 +53,7 @@ class Experiment:
 
             finish_time = perf_counter()
 
-            results = self.run()
+            results = self.__run()
 
             finish_time = perf_counter() - finish_time
 
@@ -71,17 +69,18 @@ class Experiment:
 
         self.logger.info(f'Experiment completed in {start_time:.2f} seconds ({successful}/{self.runs} successful)')
 
-    def run(self):
+    def __run(self):
         # Collect 3 images from the camera
         # TODO: Add support for 3 =< images
 
-        imgs, ref_imgs = self.test_images()
+        if self.debug: imgs, ref_imgs = self.test_images()
+        else: imgs, ref_imgs = self.collect_images()
 
         f = [0, 0.2]
 
         # Calculate some constants
 
-        R_eff = ac_diffuse(self.refr_index)
+        R_eff = maths.ac_diffuse(self.refr_index)
         A = (1 - R_eff) / (2 * (1 + R_eff))
         mu_tr = self.mu_sp + self.mu_a
         ap = self.mu_sp / mu_tr
@@ -97,7 +96,7 @@ class Experiment:
         imgs_dc = gaussian_filter(DC(imgs), std_dev)
 
         # Get AC/DC Reflectance values using diffusion approximation
-        r_ac, r_dc = diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
+        r_ac, r_dc = maths.diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
 
         R_d_AC2 = (imgs_ac / ref_imgs_ac) * r_ac
         R_d_DC2 = (imgs_dc / ref_imgs_dc) * r_dc
@@ -131,8 +130,8 @@ class Experiment:
 
                 g = lambda mu_effp: (3 * A * ap) / (((mu_effp / mu_tr) + 1) * ((mu_effp / mu_tr) + 3 * A)) 
 
-                ac = mu_eff(mu_a[i], mu_tr, f[1])
-                dc = mu_eff(mu_a[i], mu_tr, f[0])
+                ac = maths.mu_eff(mu_a[i], mu_tr, f[1])
+                dc = maths.mu_eff(mu_a[i], mu_tr, f[0])
 
                 Reflectance_AC.append(g(ac))
                 Reflectance_DC.append(g(dc))
@@ -185,6 +184,7 @@ class Experiment:
             json.dump(results, outfile, indent=4)
             self.logger.info(f'Results saved as {name}')
 
+    # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
         imgs = []
         ref_imgs = []

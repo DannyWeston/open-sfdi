@@ -1,0 +1,186 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%% Gamma calibration code                                      %%%%%%%
+%%%%%%% Written by: Danny Sims-Waterhouse 07/11/2018                %%%%%%%
+%%%%%%% Contact danny.sims-waterhouse@nottingham.ac.uk              %%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Notes
+% Set cam.exposure to 16,667 (1,000,000/60)
+% Set pause time to 0.5 and turn off the animation of Windows system
+% Set squareSizeInMM to 4
+% The folder name of Gamma_calibration should be Gamma_calibration
+% Bug is fixed so it can load existing data
+% Width and height need to be set manually if use existing data in a different computer
+% If the setup is vertical, project horizontal fringe images
+% If the setup is horizontal, project vertical fringe images
+% Switch projector_x and projector_y if change setup
+% While calculating projector_x and projector_y, interpolation can improve accuracy
+% Real stereo calibration should be performed
+% The projector lens distortion shoud be considered
+% The calibration board should take up about one third of the view
+% The calibration pattern orientations should not be too similar
+% Poor calibration accuracy will cause unstable solution
+% Pass screen resolution to functions
+
+
+% Error information from Matlab
+% Error using estimateCameraParameters>computeIntrinsics
+% Unable to estimate camera parameters. Images may contain severe lens distortion or the 3-D orientations of
+% the calibration pattern are too similar across images. If calibration pattern orientations are too similar,
+% try removing very similar images or adding additional images with the pattern in varied orientations.
+
+
+%%
+
+% This code is for gamma correction. It's necessary when the projector is
+% working in Video Mode. It can be skipped if the projector is working in
+% Pattern Sequence Mode because the linearity is good in this mode. This
+% mode makes LightCrafter different from other commercial projectors.
+
+clear all ;
+close all ;
+clc ;
+
+addpath('Toolbox') ;
+
+%% Program settings
+
+filename = 'System_information/Gamma_calibration' ; % please don't change this
+mkdir(filename) ;
+mkdir([ filename '/images' ]) ;
+
+% Device ID to display fringes
+% This is the screen ID. Set it to 2 if you want to extend rather than
+% duplicate your screen.
+device = 1 ;
+
+% Camera settings
+cam.setting = 2 ; % 1 for DSLR and 2 for machine vision
+
+%% Gamma correction
+
+% Get screen size
+[ width, height ] = screen_size(device) ;
+
+% Intensity value
+int_val = round(linspace(0,255,40)) ;
+
+% Generate images
+pre_all_im = ones(height,width,3) ;
+for k = 1:length(int_val)
+    
+    int_im{k} = uint8(pre_all_im.*int_val(k)) ;
+    
+end
+
+%% Connect to camera
+
+% If the machine vision camera is selected, camera parameters must be set
+if cam.setting == 1 % 1 for DSLR
+    
+    C = CameraController ;
+    C.session.folder = [ cd '/' filename '/images' ] ;
+    
+elseif cam.setting == 2 % 2 for machine vision
+    
+    cam.number = 1 ;
+    cam.exposure = 16666 ;
+    C = Connect_machine_vision(cam.number,cam.exposure) ;
+    start(C.vid) ;
+end
+
+
+%% Display and capture
+
+for n = 1:length(int_val)
+    
+    
+    fullscreen(int_im{n},device) ;
+    
+    pause(0.5)
+    
+    if cam.setting == 1 % 1 for DSLR
+        
+        C.Capture([ 'Intensity_' num2str(n) ]) ;
+        
+    elseif cam.setting == 2 % 2 for machine vision
+        
+        Images{n} = Camera_Capture(C) ;
+        
+    end
+    
+end
+
+closescreen() ;
+
+if cam.setting == 2 % 2 for machine vision
+    
+    stop(C.vid)
+    
+end
+
+%% Read in images if a dslr was used, or write if not
+
+if cam.setting == 1 % 1 for DSLR
+    
+    for n = 1:length(int_val)
+        
+        
+        Images{n} = imread([ cd '/' filename '/images/Intensity_' ...
+            num2str(n) '.jpg' ]) ;
+        
+    end
+    
+end
+
+%% Extract averages
+
+% Determine central region position
+Res = size(Images{1}) ;
+rows = round(Res(1)./2) + (-200:200) ;
+cols = round(Res(2)./2) + (-200:200) ;
+
+for  n = 1:length(int_val)
+    
+    %Im_c = rgb2gray(Images{n}) ;
+    Im_c = (Images{n}) ;
+    
+    av(n) = mean(mean(Im_c(rows,cols))) ;
+    
+end
+
+%% Characterise gamma curve
+
+% Calculate max intensity
+max_int = max(av) ;
+
+% Normalise average
+av = av ./ max_int ;
+av = av .* 255 ;
+
+% Determine minimum threshold area
+vis_int = av>=10 ;
+
+% Calculate minimum detectable variation and baseline
+min_int = int_val(find(vis_int,1)) ;
+baseline = min_int./255 ;
+baseline = baseline .* 1.05 ;
+
+% Shift intensity data according to baseline
+av_vis = av(vis_int) ;
+int_val_vis = int_val(vis_int) ;
+
+% Fit polynomial to the curve
+gamma_curve = fit(av_vis',int_val_vis','poly6') ;
+
+plot(gamma_curve,av_vis,int_val_vis) ;
+xlabel('Captured intensity/Pixels');
+ylabel('Projected intensity/Pixels');
+title('Gamma curve')
+
+%% Export data
+
+gamma_data.Baseline = baseline ;
+gamma_data.Gamma_curve = gamma_curve ;
+
+save([ filename '/Gamma_calibration.mat' ],'gamma_data') ;
