@@ -6,13 +6,12 @@ import logging
 import json
 import os
 
-import sfdi.utils.Maths as Maths
-
 from time import sleep, perf_counter
 from datetime import datetime
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
 
+from sfdi.utils import maths
 from sfdi.video import Camera, PygameProjector
 
 class Experiment:
@@ -82,7 +81,7 @@ class Experiment:
 
         # Calculate some constants
 
-        R_eff = Maths.ac_diffuse(self.refr_index)
+        R_eff = maths.ac_diffuse(self.refr_index)
         A = (1 - R_eff) / (2 * (1 + R_eff))
         mu_tr = self.mu_sp + self.mu_a
         ap = self.mu_sp / mu_tr
@@ -91,14 +90,14 @@ class Experiment:
 
         # Apply some gaussian filtering
 
-        ref_imgs_ac = gaussian_filter(Maths.AC(ref_imgs), std_dev)
-        ref_imgs_dc = gaussian_filter(Maths.DC(ref_imgs), std_dev)
+        ref_imgs_ac = gaussian_filter(maths.AC(ref_imgs), std_dev)
+        ref_imgs_dc = gaussian_filter(maths.DC(ref_imgs), std_dev)
 
-        imgs_ac = gaussian_filter(Maths.AC(imgs), std_dev)
-        imgs_dc = gaussian_filter(Maths.DC(imgs), std_dev)
+        imgs_ac = gaussian_filter(maths.AC(imgs), std_dev)
+        imgs_dc = gaussian_filter(maths.DC(imgs), std_dev)
 
         # Get AC/DC Reflectance values using diffusion approximation
-        r_ac, r_dc = Maths.diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
+        r_ac, r_dc = maths.diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
 
         R_d_AC2 = (imgs_ac / ref_imgs_ac) * r_ac
         R_d_DC2 = (imgs_dc / ref_imgs_dc) * r_dc
@@ -132,8 +131,8 @@ class Experiment:
 
                 g = lambda mu_effp: (3 * A * ap) / (((mu_effp / mu_tr) + 1) * ((mu_effp / mu_tr) + 3 * A)) 
 
-                ac = Maths.mu_eff(mu_a[i], mu_tr, f[1])
-                dc = Maths.mu_eff(mu_a[i], mu_tr, f[0])
+                ac = maths.mu_eff(mu_a[i], mu_tr, f[1])
+                dc = maths.mu_eff(mu_a[i], mu_tr, f[0])
 
                 Reflectance_AC.append(g(ac))
                 Reflectance_DC.append(g(dc))
