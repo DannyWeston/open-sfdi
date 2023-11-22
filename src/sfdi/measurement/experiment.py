@@ -71,11 +71,11 @@ class Experiment:
         self.logger.info(f'Experiment completed in {start_time:.2f} seconds ({successful}/{self.runs} successful)')
 
     def __run(self):
-        # Collect 3 images from the camera
-        # TODO: Add support for 3 =< images
+        path = # TODO: make into its own argument in sfdi.measurement.args
+        fringe_imgs = self.load_fringe_patterns(path)
 
         if self.debug: imgs, ref_imgs = self.test_images()
-        else: imgs, ref_imgs = self.collect_images()
+        else: imgs, ref_imgs = self.collect_images(fringe_imgs)
 
         f = [0, 0.2]
 
@@ -185,10 +185,16 @@ class Experiment:
             json.dump(results, outfile, indent=4)
             self.logger.info(f'Results saved as {name}')
 
-    def __del__(self):
-        if self.camera: del self.camera
+    def load_fringe_patterns(self, path, n=3):
+        imgs = []
 
-        if self.projector: del self.projector
+        if n < 0: return None
+
+        for i in range(n):
+            pass
+        # TODO: Load fringe patterns from disk using provided path
+        
+        return imgs
 
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
@@ -198,6 +204,7 @@ class Experiment:
         img_paths = self.proj_imgs[:3]
         ref_img_paths = self.proj_imgs[3:]
 
+        #TODO: Chekc if images correctly loaded
         for path in img_paths:
             img = cv2.imread(path, 1).astype(np.double)
             img = img[:, :, 2] # Only keep red channel in images
@@ -213,7 +220,7 @@ class Experiment:
     def collect_images(self, fringe_patterns, delay=3):
         imgs = []
 
-        for i in range(len(fringe_patterns) / 2):
+        for i in range(len(fringe_patterns)):
             self.projector.display(img)
             sleep(delay)
 
@@ -224,3 +231,8 @@ class Experiment:
             imgs.append(img)
 
         return imgs
+    
+    def __del__(self):
+        if self.camera: del self.camera
+
+        if self.projector: del self.projector
