@@ -14,6 +14,8 @@ from args import handle_args
 
 from sfdi.measurement.experiment import Experiment
 
+from args import handle_args
+
 def main():
     args = handle_args()
 
