@@ -35,12 +35,12 @@ class PygameProjector(Projector):
     def __init__(self, width, height):
         super().__init__(width, height)
 
+        pygame.init()
+        pygame.display.init()
+
         d_info = pygame.display.Info()
         self.d_width = d_info.current_w
         self.d_height = d_info.current_h
-
-        pygame.init()
-        pygame.display.init()
 
     def __del__(self):
         pygame.quit()
