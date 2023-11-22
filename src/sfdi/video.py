@@ -5,7 +5,7 @@ import io
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 
-from picamera2 import PiCamera2
+from picamera2 import Picamera2
 from fractions import Fraction
 
 DEFAULT_CAM_SETTINGS = {    
@@ -51,7 +51,7 @@ class Camera:
 
         self.serial_number = output.decode("utf-8").strip("\n")
 
-        self.camera = PiCamera2(settings["resolution"], Fraction(settings["frame_rate"] / 1))
+        self.camera = Picamera2(settings["resolution"], Fraction(settings["frame_rate"] / 1))
 
         self.camera.exposure_mode = settings["exposure"]    # Disable exposure
         self.camera.shutter_speed = settings["shutter_speed"] # Shutter speed
