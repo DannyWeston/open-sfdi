@@ -188,7 +188,7 @@ class Experiment:
     def __del__(self):
         if self.camera: del self.camera
 
-        if self.projector: del self.proj
+        if self.projector: del self.projector
 
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
