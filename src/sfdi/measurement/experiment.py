@@ -7,13 +7,12 @@ import logging
 import json
 import os
 
-from time import sleep
+from time import sleep, perf_counter
 
-from time import perf_counter
 from datetime import datetime
 
-from sfdi.utils import maths
-from sfdi.video import Camera
+from sfdi.utils import Maths
+from sfdi.video import Camera, PygameProjector
 
 class Experiment:
     def __init__(self, args):
@@ -38,6 +37,8 @@ class Experiment:
         self.camera_path = args["camera"]
 
         self.camera = Camera()
+
+        self.projector = PygameProjector(1280, 720)
 
         self.logger = logging.getLogger()
 
@@ -80,7 +81,7 @@ class Experiment:
 
         # Calculate some constants
 
-        R_eff = maths.ac_diffuse(self.refr_index)
+        R_eff = Maths.ac_diffuse(self.refr_index)
         A = (1 - R_eff) / (2 * (1 + R_eff))
         mu_tr = self.mu_sp + self.mu_a
         ap = self.mu_sp / mu_tr
@@ -89,14 +90,14 @@ class Experiment:
 
         # Apply some gaussian filtering
 
-        ref_imgs_ac = gaussian_filter(AC(ref_imgs), std_dev)
-        ref_imgs_dc = gaussian_filter(DC(ref_imgs), std_dev)
+        ref_imgs_ac = gaussian_filter(Maths.AC(ref_imgs), std_dev)
+        ref_imgs_dc = gaussian_filter(Maths.DC(ref_imgs), std_dev)
 
-        imgs_ac = gaussian_filter(AC(imgs), std_dev)
-        imgs_dc = gaussian_filter(DC(imgs), std_dev)
+        imgs_ac = gaussian_filter(Maths.AC(imgs), std_dev)
+        imgs_dc = gaussian_filter(Maths.DC(imgs), std_dev)
 
         # Get AC/DC Reflectance values using diffusion approximation
-        r_ac, r_dc = maths.diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
+        r_ac, r_dc = Maths.diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
 
         R_d_AC2 = (imgs_ac / ref_imgs_ac) * r_ac
         R_d_DC2 = (imgs_dc / ref_imgs_dc) * r_dc
@@ -130,8 +131,8 @@ class Experiment:
 
                 g = lambda mu_effp: (3 * A * ap) / (((mu_effp / mu_tr) + 1) * ((mu_effp / mu_tr) + 3 * A)) 
 
-                ac = maths.mu_eff(mu_a[i], mu_tr, f[1])
-                dc = maths.mu_eff(mu_a[i], mu_tr, f[0])
+                ac = Maths.mu_eff(mu_a[i], mu_tr, f[1])
+                dc = Maths.mu_eff(mu_a[i], mu_tr, f[0])
 
                 Reflectance_AC.append(g(ac))
                 Reflectance_DC.append(g(dc))
@@ -184,6 +185,11 @@ class Experiment:
             json.dump(results, outfile, indent=4)
             self.logger.info(f'Results saved as {name}')
 
+    def __del__(self):
+        if self.camera: del self.camera
+
+        if self.projector: del self.projector
+
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
         imgs = []
@@ -204,24 +210,17 @@ class Experiment:
 
         return imgs, ref_imgs
 
-    def collect_images(self, fringe_patterns):
+    def collect_images(self, fringe_patterns, delay=3):
         imgs = []
 
-        for pattern in fringe_patterns:
-            cv2.namedWindow("main", cv2.WND_PROP_FULLSCREEN)          
-            cv2.setWindowProperty("main", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-            cv2.imshow("main", pattern)
+        for i in range(len(fringe_patterns) / 2):
+            self.projector.display(img)
+            sleep(delay)
 
-            sleep(1) # Allow image warmup time
+            img = self.camera.capture()
+            cv2.imwrite(f"{self.output_dir}/results/images/{i},jpg", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            sleep(delay)
 
-            img = self.camera.take_image() # Take a picture
-
-            if not img:
-                self.logger.error("Could not take an image using the camera")
-                return None
-
-            img = img[:, :, 2] # Apply some post processing (only keep red channel)
-            
             imgs.append(img)
 
         return imgs

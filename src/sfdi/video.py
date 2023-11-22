@@ -3,10 +3,13 @@ import cv2
 import subprocess
 import io
 import numpy as np
-from numpy.lib.stride_tricks import as_strided
+
+import pygame
+import cv2
 
 from picamera2 import Picamera2
 from fractions import Fraction
+from numpy.lib.stride_tricks import as_strided
 
 DEFAULT_CAM_SETTINGS = {    
     "serial": '3816',
@@ -21,59 +24,65 @@ DEFAULT_CAM_SETTINGS = {
 }
 
 class Projector:
-    def __init__(self, width=1280, height=720, fb='/dev/fb0'):
+    def __init__(self, width, height):
         self.width = width
         self.height = height
 
-        self.f_buffer = np.memmap(fb, 
-            dtype='uint8', mode='w+', 
-            shape=(height, width, 4)
-        )
+    def display(self, img):
+        pass
+
+class PygameProjector(Projector):
+    def __init__(self, width, height):
+        super().__init__(width, height)
+
+        d_info = pygame.display.Info()
+        self.d_width = d_info.current_w
+        self.d_height = d_info.current_h
+
+        pygame.init()
+        pygame.display.init()
+
+    def __del__(self):
+        pygame.quit()
 
     def display(self, img):
-        self.f_buffer[:] = [255, 0, 0, 255] # Blue
-
-    def clear(self):
-        self.f_buffer[:] = [0, 0, 0, 255] # Nothing
+        screen = pygame.display.set_mode((self.d_width, self.d_height), pygame.FULLSCREEN)
+        screen.blit(pygame.transform.scale(img, (self.d_width, self.d_height)), (0, 0))
+        pygame.display.flip()
 
 class Camera:
     def __init__(self, settings = DEFAULT_CAM_SETTINGS):
-        #self.camera = cv2.VideoCapture(camera_id)
-        #self.camera.set(cv2.CAP_PROP_SETTINGS, 1)
-
         self.settings = settings
 
         self.width, self.height = settings["resolution"]
 
-        cmd = 'cat /proc/cpuinfo | grep Serial|cut -d " " -f 2'
+        cmd = 'cat /proc/cpuinfo | grep Serial | cut -d " " -f 2'
         child = subprocess.Popen(cmd, stdout = subprocess.PIPE, shell = True)
         output = child.communicate()[0]
 
         self.serial_number = output.decode("utf-8").strip("\n")
 
-        self.camera = Picamera2(settings["resolution"], Fraction(settings["frame_rate"] / 1))
+        Picamera2.set_logging(Picamera2.ERROR) # Remove console spam on init
+        self.camera = Picamera2()
+        camera_config = self.camera.create_still_configuration(
+            main={"size": (1920, 1080)}, 
+            lores={"size": (1920, 1080)},
+            display="lores"
+        )
 
-        self.camera.exposure_mode = settings["exposure"]    # Disable exposure
-        self.camera.shutter_speed = settings["shutter_speed"] # Shutter speed
+        self.camera.configure(camera_config)
+        self.camera.start()
 
-        self.camera.awb_mode = 'off'
-        self.camera.awb_gains = (settings["redgreen_gain"], settings["bluegreen_gain"]) # Set r/g & b/g gain
+        # self.camera.exposure_mode = settings["exposure"]    # Disable exposure
+        # self.camera.shutter_speed = settings["shutter_speed"] # Shutter speed
 
-    def close(self):
-        self.camera.close()
-
-    def show_raw_feed(self):
-        while True:
-            ret_val, img = self.camera.read()
-
-            if ret_val:
-                cv2.imshow(self.camera_id, img)
-
-                if cv2.waitKey(1) == 27: break  # esc to quit
-
-        cv2.destroyAllWindows()
+        # self.camera.awb_mode = 'off'
+        # self.camera.awb_gains = (settings["redgreen_gain"], settings["bluegreen_gain"]) # Set r/g & b/g gain
 
     def capture(self):
+        return self.camera.capture_array("main")
+
+    def __capture(self):
         stream = io.BytesIO()
         self.camera.capture(stream, format='jpeg', bayer=True)
 
@@ -246,3 +255,6 @@ class Camera:
         # Something is wrong
         
         return None
+    
+    def __del__(self):
+        self.camera.close()
