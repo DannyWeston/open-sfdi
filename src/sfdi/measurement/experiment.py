@@ -1,17 +1,18 @@
 
 import numpy as np
 import cv2
-from scipy.ndimage import gaussian_filter
-from scipy.interpolate import griddata
+
 import logging
 import json
 import os
 
+import sfdi.utils.Maths as Maths
+
 from time import sleep, perf_counter
-
 from datetime import datetime
+from scipy.ndimage import gaussian_filter
+from scipy.interpolate import griddata
 
-from sfdi.utils import Maths
 from sfdi.video import Camera, PygameProjector
 
 class Experiment:
@@ -188,7 +189,7 @@ class Experiment:
     def __del__(self):
         if self.camera: del self.camera
 
-        if self.projector: del self.projector
+        if self.projector: del self.proj
 
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
