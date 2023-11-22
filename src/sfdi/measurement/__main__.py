@@ -10,8 +10,6 @@ logging.basicConfig(
     level = logging.INFO, 
     format="[%(levelname)s %(asctime)s] %(message)s"
 )
-from args import handle_args
-
 from sfdi.measurement.experiment import Experiment
 
 from sfdi.measurement.args import handle_args
