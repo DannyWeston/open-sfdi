@@ -13,78 +13,69 @@ from scipy.interpolate import griddata
 
 from sfdi.utils import maths
 from sfdi.video import Camera, PygameProjector
+from sfdi.definitions import RESULTS_DIR, FRINGES_DIR
 
 class Experiment:
-    def __init__(self, args):
-        self.proj_imgs = args["proj_imgs"]      # Projection images to use
-        self.refr_index = args["refr_index"]    # Refractive index of material
-        self.debug = args["debug"]              # Debug mode or not
-        
-        self.runs = args["runs"]                # How many runs to complete
-        
-        self.output_dir = os.path.join(args["output_dir"], datetime.now().strftime("%Y%m%d_%H%M%S"))
-
-        # Attempt to create results directory
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir, exist_ok=True)
-
-        elif 0 < len(os.listdir(self.output_dir)):
-            raise FileExistsError(f'Experiment results directory {self.output_dir} is not empty!')
-
-        self.mu_a = args["mu_a"]                # Reference absorption coefficient
-        self.mu_sp = args["mu_sp"]              # Reference scattering coefficient
-
-        self.camera_path = args["camera"]
-
-        self.camera = Camera()
-
-        self.projector = PygameProjector(1280, 720)
+    def __init__(self, camera=Camera(), projector=PygameProjector(1280, 720), debug=False):
+        self.debug = debug  # Debug mode or not
 
         self.logger = logging.getLogger()
 
-    def start(self):
-        start_time = perf_counter()
+        self.camera = camera
+        self.projector = projector 
 
-        successful = 0
+    def run(self, fringe_paths, refr_index, mu_a, mu_sp, run_count):
+        # TODO: Abstract this into image collection class
+        # TODO: Abstract calculations into class
+
+        self.logger.info(f'Starting experiment')
+        timestamp = f'{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+
+        # Load the fringe patterns
+        fringe_patterns = [self.load_fringe_pattern(fringe) for fringe in fringe_paths]
 
         # Iterate through the runs, storing the results where necessary
-
-        for i in range(1, self.runs + 1):
+        successful = 0
+        for i in range(1, run_count + 1):
             self.logger.info(f'Starting run {i}')
 
-            finish_time = perf_counter()
+            # Load the images to be used (use already provided images if in debug)
+            if self.debug: 
+                imgs, ref_imgs = self.test_images()
 
-            results = self.__run()
+            else: 
+                ref_imgs = self.collect_images(fringe_patterns)
+                #TODO: Introduce way to prompt user they have the object in place
+                imgs = self.collect_images(fringe_patterns)
 
-            finish_time = perf_counter() - finish_time
+            # Calculate parameters
+            calc_time = perf_counter()
+            results = self.calculate(ref_imgs, imgs, refr_index, mu_a, mu_sp)
+            calc_time = perf_counter() - calc_time
 
-            if results is None: continue
+            if results is None: 
+                # TODO: Write error message to console
+                continue
 
             successful += 1
             
-            self.logger.info(f'Run {i} completed in {finish_time:.2f} seconds')
+            self.logger.info(f'Calculation completed in {calc_time:.2f} seconds')
+            
+            self.save_results(results, f'{timestamp}_{i}.json')
 
-            self.save_results(results, self.output_dir, f'run{i}.json')
+            self.logger.info(f'Run {i} completed')
 
-        start_time = perf_counter() - start_time
+        self.logger.info(f'{successful}/{run_count} total runs successful)')
 
-        self.logger.info(f'Experiment completed in {start_time:.2f} seconds ({successful}/{self.runs} successful)')
-
-    def __run(self):
-        path = # TODO: make into its own argument in sfdi.measurement.args
-        fringe_imgs = self.load_fringe_patterns(path)
-
-        if self.debug: imgs, ref_imgs = self.test_images()
-        else: imgs, ref_imgs = self.collect_images(fringe_imgs)
-
+    def calculate(self, ref_imgs, imgs, refr_index, mu_a, mu_sp):
         f = [0, 0.2]
 
         # Calculate some constants
 
-        R_eff = maths.ac_diffuse(self.refr_index)
+        R_eff = maths.ac_diffuse(refr_index)
         A = (1 - R_eff) / (2 * (1 + R_eff))
-        mu_tr = self.mu_sp + self.mu_a
-        ap = self.mu_sp / mu_tr
+        mu_tr = mu_sp + mu_a
+        ap = mu_sp / mu_tr
 
         std_dev = 3
 
@@ -97,7 +88,7 @@ class Experiment:
         imgs_dc = gaussian_filter(maths.DC(imgs), std_dev)
 
         # Get AC/DC Reflectance values using diffusion approximation
-        r_ac, r_dc = maths.diffusion_approximation(self.refr_index, self.mu_a, self.mu_sp, f[1])
+        r_ac, r_dc = maths.diffusion_approximation(refr_index, mu_a, mu_sp, f[1])
 
         R_d_AC2 = (imgs_ac / ref_imgs_ac) * r_ac
         R_d_DC2 = (imgs_dc / ref_imgs_dc) * r_dc
@@ -114,7 +105,7 @@ class Experiment:
         mu_a = np.arange(0, 0.5, 0.001) # We are setting the absorption coefficient range
         mu_sp = np.arange(0.1, 5, 0.01)
 
-        n = 1.43 #refractive index of tissue
+        n = 1.43 # Refractive index of tissue
 
         # THE DIFFUSION APPROXIMATION
         # Getting the diffuse reflectance AC values corresponding to specific absorption and reduced scattering coefficients
@@ -180,21 +171,13 @@ class Experiment:
             "scattering_std_dev" : scattering_std,
         }
 
-    def save_results(self, results, dir, name):
-        with open(os.path.join(dir, name), 'w') as outfile:
+    def save_results(self, results, name):
+        with open(os.path.join(RESULTS_DIR, name), 'w') as outfile:
             json.dump(results, outfile, indent=4)
-            self.logger.info(f'Results saved as {name}')
+            self.logger.info(f'Results saved in {name}')
 
-    def load_fringe_patterns(self, path, n=3):
-        imgs = []
-
-        if n < 0: return None
-
-        for i in range(n):
-            pass
-        # TODO: Load fringe patterns from disk using provided path
-        
-        return imgs
+    def load_fringe_pattern(self, name):
+        return cv2.imread(os.path.join(FRINGES_DIR, name)).astype(np.double)
 
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):

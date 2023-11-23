@@ -1,12 +1,14 @@
 import argparse, os
 
+from sfdi.definitions import FRINGES_DIR
+
 def handle_args():
     parser = argparse.ArgumentParser()
 
-    #parser.add_argument("--proj_imgs", help="Path to the images for the projector to display")
-    parser.add_argument("--proj_imgs", nargs='+', type=str,
-        default=[f'{os.getcwd()}/data/test_a{i + 1}.jpg' for i in range(3)] + [f'{os.getcwd()}/data/test_b{i + 1}.jpg' for i in range(3)],
-        help="Path to the three images for the projector to display")
+    # By default use 3 images with names fringe_<0-2>.jpg
+    parser.add_argument("--fringes", nargs='+', type=str,
+        default=[f'{FRINGES_DIR}/fringes_{i}.jpg' for i in range(3)],
+        help="Path to the fringe images to be displayed by the projector")
 
     parser.add_argument("--runs", type=int, default=1,
         help="How many times to collect a sample for each projection image")
@@ -22,10 +24,7 @@ def handle_args():
     
     parser.add_argument("--refr_index", type=float, default=1.43,
         help="Refractive index to use")
-    
-    parser.add_argument("--output_dir", type=str, default='/home/admin/OPTIMlab-benchtop-sfdi/results',
-        help="Output directory to place results from an experiment (will create last directory if not present)")
-    
+
     parser.add_argument("--mu_a", type=float, default=0.018,
         help="TODO: Write help")
     
