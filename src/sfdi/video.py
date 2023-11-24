@@ -46,6 +46,8 @@ class PygameProjector(Projector):
         pygame.quit()
 
     def display(self, img):
+        img = pygame.surfarray.make_surface(img)
+
         screen = pygame.display.set_mode((self.d_width, self.d_height), pygame.FULLSCREEN)
         screen.blit(pygame.transform.scale(img, (self.d_width, self.d_height)), (0, 0))
         pygame.display.flip()
