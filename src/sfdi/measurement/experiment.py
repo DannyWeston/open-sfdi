@@ -61,7 +61,7 @@ class Experiment:
             
             self.logger.info(f'Calculation completed in {calc_time:.2f} seconds')
             
-            self.save_results(results, f'{timestamp}_{i}.json')
+            self.save_results(f'{timestamp}_{i}', results, ref_imgs, imgs)
 
             self.logger.info(f'Run {i} completed')
 
@@ -171,10 +171,24 @@ class Experiment:
             "scattering_std_dev" : scattering_std,
         }
 
-    def save_results(self, results, name):
-        with open(os.path.join(RESULTS_DIR, name), 'w') as outfile:
+    def save_results(self, name, results, ref_imgs=[], imgs=[]):
+        # Make directory for results to go (and subdir for images) in using timestamp
+        dir = os.path.join(RESULTS_DIR, name)
+        images_dir = os.path.join(dir, 'images/')
+
+        os.mkdir(dir, 0o770)
+        os.mkdir(images_dir, 0o770)
+
+        with open(os.path.join(dir, 'results.json'), 'w') as outfile:
             json.dump(results, outfile, indent=4)
-            self.logger.info(f'Results saved in {name}')
+
+        for i, img in enumerate(ref_imgs):
+            cv2.imwrite(os.path.join(images_dir, f'ref_img{i}.jpg'), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+
+        for i, img in enumerate(imgs):
+            cv2.imwrite(os.path.join(images_dir, f'img{i}.jpg'), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+
+        self.logger.info(f'Results saved in {dir}')
 
     def load_fringe_pattern(self, name):
         self.logger.info(name)
@@ -210,7 +224,6 @@ class Experiment:
             sleep(delay)
 
             img = self.camera.capture()
-            cv2.imwrite(f"{self.output_dir}/results/images/{i},jpg", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
             sleep(delay)
 
             imgs.append(img)
