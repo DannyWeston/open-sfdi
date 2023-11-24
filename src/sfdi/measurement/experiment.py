@@ -53,10 +53,6 @@ class Experiment:
             results = self.calculate(ref_imgs, imgs, refr_index, mu_a, mu_sp)
             calc_time = perf_counter() - calc_time
 
-            if results is None: 
-                # TODO: Write error message to console
-                continue
-
             successful += 1
             
             self.logger.info(f'Calculation completed in {calc_time:.2f} seconds')
@@ -179,8 +175,11 @@ class Experiment:
         os.mkdir(dir, 0o770)
         os.mkdir(images_dir, 0o770)
 
-        with open(os.path.join(dir, 'results.json'), 'w') as outfile:
-            json.dump(results, outfile, indent=4)
+        if results:
+            with open(os.path.join(dir, 'results.json'), 'w') as outfile:
+                json.dump(results, outfile, indent=4)
+        else:
+            self.logger.warning("Could not save numerical results")
 
         for i, img in enumerate(ref_imgs):
             cv2.imwrite(os.path.join(images_dir, f'ref_img{i}.jpg'), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
@@ -191,7 +190,6 @@ class Experiment:
         self.logger.info(f'Results saved in {dir}')
 
     def load_fringe_pattern(self, name):
-        self.logger.info(name)
         img = cv2.imread(os.path.join(FRINGES_DIR, name))
         return img.astype(np.double)
 
