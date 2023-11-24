@@ -177,7 +177,9 @@ class Experiment:
             self.logger.info(f'Results saved in {name}')
 
     def load_fringe_pattern(self, name):
-        return cv2.imread(os.path.join(FRINGES_DIR, name)).astype(np.double)
+        self.logger.info(name)
+        img = cv2.imread(os.path.join(FRINGES_DIR, name))
+        return img.astype(np.double)
 
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
