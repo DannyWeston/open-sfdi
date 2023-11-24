@@ -50,8 +50,10 @@ class Experiment:
 
             # Calculate parameters
             calc_time = perf_counter()
-            results = self.calculate(ref_imgs, imgs, refr_index, mu_a, mu_sp)
+            #results = self.calculate(ref_imgs, imgs, refr_index, mu_a, mu_sp)
             calc_time = perf_counter() - calc_time
+
+            results = None
 
             successful += 1
             

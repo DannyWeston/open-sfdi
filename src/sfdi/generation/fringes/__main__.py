@@ -12,10 +12,6 @@ import os
 
 from sfdi.definitions import FRINGES_DIR
 
-# LG Projector spatial frequency - pixels per cm
-# e.g: if the projected image is 10 cm wide for 1280 pixels, then 128 pixels wide per cm
-
-LG_PROTECTOR_SF = 128
 def sinusoidal(width, height, freq, phase=0, orientation=np.pi / 2):
     x, y = np.meshgrid(np.arange(width), np.arange(height))
     gradient = np.sin(orientation) * x - np.cos(orientation) * y
@@ -29,7 +25,7 @@ def phase_animation(width, height, freq, orientation):
         img = cv2.resize(img, (int(width / 3), int(height / 3)))  
 
         cv2.imshow('Phase Shifting', img)
-        key = cv2.waitKey(int(1000 / 30))
+        key = cv2.waitKey(int(1000 / 30)) # Roughly 30 fps
         counter += 0.05
         if key == 27:
             cv2.destroyAllWindows()
@@ -49,14 +45,20 @@ def save_image(img, name):
     out = os.path.join(FRINGES_DIR, name)
     cv2.imwrite(out, img)
 
+# LG Projector spatial frequency - pixels per cm
+# e.g: if the projected image is 10 cm wide for 1280 pixels, then 128 pixels wide per cm
+projector_sfs = {
+    'LG' : 32,
+}
+
 width = 1280
 height = 720
 
-freq = LG_PROTECTOR_SF
+freq = projector_sfs['LG']
 orientation = np.pi / 2
 imgs = generate_images(width, height, freq, orientation)
 
 for i, img in enumerate(imgs):
-    save_image(img, f'fringes_{i}')
+    save_image(img, f'fringes_{i}.jpg')
 
 #phase_animation(width, height, freq, orientation)
