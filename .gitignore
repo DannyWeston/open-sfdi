@@ -1,7 +1,7 @@
 # Custom paths to not include
-
-data/
 results/
+
+.vscode
 
 
 
