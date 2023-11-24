@@ -1,4 +1,4 @@
-import argparse, os
+import argparse
 
 from sfdi.definitions import FRINGES_DIR
 

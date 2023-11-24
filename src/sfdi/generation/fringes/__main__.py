@@ -8,6 +8,10 @@ import matplotlib.animation as animation
 import cv2
 import time
 
+import os
+
+from sfdi.definitions import FRINGES_DIR
+
 # LG Projector spatial frequency - pixels per cm
 # e.g: if the projected image is 10 cm wide for 1280 pixels, then 128 pixels wide per cm
 
@@ -32,7 +36,18 @@ def phase_animation(width, height, freq, orientation):
             break
 
 def generate_images(width, height, freq, orientation, n=3):
-    return [sinusoidal(width, height, freq, 2 * i * np.pi / n, orientation) for i in range(n)]
+    imgs = []
+
+    for i in range(n):
+        img = sinusoidal(width, height, freq, 2 * i * np.pi / n, orientation)
+        img = ((img - img.min()) / (img.max() - img.min())) * 255
+        imgs.append(img)
+
+    return imgs
+
+def save_image(img, name):
+    out = os.path.join(FRINGES_DIR, name)
+    cv2.imwrite(out, img)
 
 width = 1280
 height = 720
@@ -41,4 +56,7 @@ freq = LG_PROTECTOR_SF
 orientation = np.pi / 2
 imgs = generate_images(width, height, freq, orientation)
 
-phase_animation(width, height, freq, orientation)
+for i, img in enumerate(imgs):
+    save_image(img, f'fringes_{i}')
+
+#phase_animation(width, height, freq, orientation)

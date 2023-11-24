@@ -21,7 +21,7 @@ def diffusion_approximation(n, mu_a, mu_sp, f_ac):
     mu_tr = mu_a + mu_sp
     ap = mu_sp / mu_tr
 
-    r_ac = (3 * A * ap)/(((2 * np.pi * f_ac) / mu_tr) ** 2 + ((2 * np.pi * f_ac) / mu_tr) * (1 + 3 * A) + 3 * A)
+    r_ac = (3 * A * ap) / (((2 * np.pi * f_ac) / mu_tr) ** 2 + ((2 * np.pi * f_ac) / mu_tr) * (1 + 3 * A) + 3 * A)
     r_dc = (3 * A * ap) / (3 * (1 - ap) + (1 + 3 * A) * np.sqrt(3 * (1 - ap)) + 3 * A)
 
     return r_ac, r_dc
