@@ -205,7 +205,7 @@ class Experiment:
     def collect_images(self, fringe_patterns, delay=3):
         imgs = []
 
-        for i in range(len(fringe_patterns)):
+        for i, img in enumerate(fringe_patterns):
             self.projector.display(img)
             sleep(delay)
 
