@@ -22,9 +22,23 @@ class Experiment:
         self.logger = logging.getLogger()
 
         self.camera = camera
-        self.projector = projector 
+        self.projector = projector
 
     def run(self, fringe_paths, refr_index, mu_a, mu_sp, run_count):
+        """
+        Runs a fringe projection experiment and attempts to write the
+        results to a file on disk.
+
+        Args:
+            fringe_paths (str): Paths to the fringe images to be loaded.
+            refr_index (float): Refractive index of the material.
+            mu_a (float): Coefficient of absorption.
+            mu_sp (float): Coefficient of reduced scattering.
+            run_count (int): Number of times to run the experiment.
+
+        Returns:
+            None
+        """
         # TODO: Abstract this into image collection class
         # TODO: Abstract calculations into class
 
@@ -40,12 +54,11 @@ class Experiment:
             self.logger.info(f'Starting run {i}')
 
             # Load the images to be used (use already provided images if in debug)
-            if self.debug: 
+            if self.debug:
                 imgs, ref_imgs = self.test_images()
 
-            else: 
+            else:
                 ref_imgs = self.collect_images(fringe_patterns)
-                #TODO: Introduce way to prompt user they have the object in place
                 imgs = self.collect_images(fringe_patterns)
 
             # Calculate parameters
@@ -56,9 +69,9 @@ class Experiment:
             results = None
 
             successful += 1
-            
+
             self.logger.info(f'Calculation completed in {calc_time:.2f} seconds')
-            
+
             self.save_results(f'{timestamp}_{i}', results, ref_imgs, imgs)
 
             self.logger.info(f'Run {i} completed')
@@ -118,7 +131,7 @@ class Experiment:
                 mu_tr = mu_a[i] + mu_sp[j]
                 ap = mu_sp[j] / mu_tr
 
-                g = lambda mu_effp: (3 * A * ap) / (((mu_effp / mu_tr) + 1) * ((mu_effp / mu_tr) + 3 * A)) 
+                g = lambda mu_effp: (3 * A * ap) / (((mu_effp / mu_tr) + 1) * ((mu_effp / mu_tr) + 3 * A))
 
                 ac = maths.mu_eff(mu_a[i], mu_tr, f[1])
                 dc = maths.mu_eff(mu_a[i], mu_tr, f[0])
@@ -129,9 +142,9 @@ class Experiment:
                 op_mua.append(mu_a[i])
                 op_sp.append(mu_sp[j])
 
-        # putting the DC and AC diffuse reflectance values generated from the Diffusion Approximation into an array    
+        # putting the DC and AC diffuse reflectance values generated from the Diffusion Approximation into an array
         points = []
-        for k in range(len(mu_a) * len(mu_sp)): 
+        for k in range(len(mu_a) * len(mu_sp)):
             freq = [Reflectance_DC[k], Reflectance_AC[k]]
             points.append(freq)
 
@@ -140,7 +153,7 @@ class Experiment:
         op_mua_array = np.array(op_mua)
         op_sp_array = np.array(op_sp)
 
-        #using scipy.interpolate.griddata to perform cubic interpolation of diffuse reflectance values to match 
+        #using scipy.interpolate.griddata to perform cubic interpolation of diffuse reflectance values to match
         #the generated diffuse reflectance values from image to calculated optical properties
         interp_method = 'cubic'
         coeff_abs = griddata(points_array, op_mua_array, xi, method=interp_method) #mua
@@ -170,6 +183,19 @@ class Experiment:
         }
 
     def save_results(self, name, results, ref_imgs=[], imgs=[]):
+        """
+        Saves some results (treated as JsonObject) subdirectory inside RESULTS_DIR with a
+        given name. Optionally, any passed in images can be saved to the same directory.
+
+        Args:
+            name (str): Name of the directory to be created.
+            results (dict): collection of results (representing JSON).
+            ref_imgs (list): Optional - collected reference images to save.
+            imgs (list): Optional - collected images to save.
+
+        Returns:
+            None
+        """
         # Make directory for results to go (and subdir for images) in using timestamp
         dir = os.path.join(RESULTS_DIR, name)
         images_dir = os.path.join(dir, 'images/')
@@ -216,12 +242,30 @@ class Experiment:
 
         return imgs, ref_imgs
 
-    def collect_images(self, fringe_patterns, delay=3):
+    def collect_images(self, fringe_patterns, delay=3, wait_input=False):
+        """
+        Uses the experiment's camera and projector to gather some fringe projection
+        images.
+
+        Args:
+            fringe_patterns (list): collection of fringe patterns to be projected.
+            delay (int): Number of seconds between image projection and camera imaging.
+            wait_input (bool): Wait for the user to press a key before taking an image.
+
+        Returns:
+            list: List of images (size equal to length of fringe_patterns)
+        """
+        
         imgs = []
 
-        for i, img in enumerate(fringe_patterns):
+        for img in fringe_patterns:
             self.projector.display(img)
             sleep(delay)
+
+            if wait_input:
+            # TODO: Display camera preview so positioning
+            #       can be accurate by user
+                input("Press enter to take measurement")
 
             img = self.camera.capture()
             sleep(delay)
@@ -229,7 +273,7 @@ class Experiment:
             imgs.append(img)
 
         return imgs
-    
+
     def __del__(self):
         if self.camera: del self.camera
 
