@@ -1,11 +1,11 @@
 import numpy as np
 
 # Demodulation (array input)
-def AC(var: list):
-    return (2 ** 0.5 / 3) * (((var[0] - var[1]) ** 2 + (var[1] - var[2]) ** 2 + (var[2] - var[0]) ** 2) ** 0.5)
+def AC(imgs: list):
+    return (2 ** 0.5 / 3) * (((imgs[0] - imgs[1]) ** 2 + (imgs[1] - imgs[2]) ** 2 + (imgs[2] - imgs[0]) ** 2) ** 0.5)
 
-def DC(var: list):
-    return (1 / 3) * (var[0] + var[1] + var[2])
+def DC(imgs: list):
+    return sum(imgs) / len(imgs)
 
 def mu_eff(mu_a, mu_tr, f):
     a = (2 * np.pi * f) ** 2

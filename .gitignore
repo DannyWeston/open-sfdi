@@ -1,26 +1,10 @@
 # Custom paths to not include
-results/
+sfdi/data/*/*
+!sfdi/data/*/.gitkeep
 
 .vscode/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+.venv/2
+**/__pycache__
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

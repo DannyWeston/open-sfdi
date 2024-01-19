@@ -1,41 +1,27 @@
-import cv2
-
-import subprocess
-import io
 import numpy as np
-
-import pygame
-import cv2
-
-from picamera2 import Picamera2
-from fractions import Fraction
 from numpy.lib.stride_tricks import as_strided
 
-DEFAULT_CAM_SETTINGS = {    
-    "serial": '3816',
-    "version" : 'v2.1 NoIR',
-    "lett" : 'D_2f',
-    "redgreen_gain" : Fraction(1 / 1),
-    "bluegreen_gain" : Fraction(1 / 1),
+import pygame
+import os
+import io
+
+from picamera2 import Picamera2
+os.environ["LIBCAMERA_LOG_LEVELS"] = "2"            # Silence PiCamera spam output
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"   # Silence Pygame spam output
+
+from sfdi.video import Camera, Projector
+
+DEFAULT_CAM_SETTINGS = {
+    "redgreen_gain" : 0,
+    "bluegreen_gain" : 0,
     "resolution": (2592, 1936),
-    "frame_rate": 1,
-    "exposure": 'off',
-    "shutter_speed": 10
+    "shutter_speed": 10000
 }
-
-class Projector:
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
-
-    def display(self, img):
-        pass
 
 class PygameProjector(Projector):
     def __init__(self, width, height):
         super().__init__(width, height)
 
-        pygame.init()
         pygame.display.init()
 
         d_info = pygame.display.Info()
@@ -52,27 +38,28 @@ class PygameProjector(Projector):
         screen.blit(pygame.transform.scale(img, (self.d_width, self.d_height)), (0, 0))
         pygame.display.flip()
 
-class Camera:
+class PiCamera(Camera):
     def __init__(self, settings = DEFAULT_CAM_SETTINGS):
-        self.settings = settings
+        super().__init__(settings)
 
         self.width, self.height = settings["resolution"]
 
-        cmd = 'cat /proc/cpuinfo | grep Serial | cut -d " " -f 2'
-        child = subprocess.Popen(cmd, stdout = subprocess.PIPE, shell = True)
-        output = child.communicate()[0]
-
-        self.serial_number = output.decode("utf-8").strip("\n")
-
         Picamera2.set_logging(Picamera2.ERROR) # Remove console spam on init
+            
         self.camera = Picamera2()
         camera_config = self.camera.create_still_configuration(
-            main={"size": (1920, 1080)}, 
-            lores={"size": (1920, 1080)},
+            main={"size": settings["resolution"]},
+            lores={"size": settings["resolution"]},
             display="lores"
         )
 
         self.camera.configure(camera_config)
+
+        # Disable auto-white balance
+        self.camera.AwbEnable = False
+        self.camera.controls.ExposureTime = settings["shutter_speed"]
+        self.camera.controls.ColourGains = (settings["redgreen_gain"], settings["bluegreen_gain"])
+
         self.camera.start()
 
         # self.camera.exposure_mode = settings["exposure"]    # Disable exposure
@@ -248,15 +235,3 @@ class Camera:
         # unpacking work at the start rather redundant...)
 
         return (output >> 2).astype(np.uint8)
-
-    def get_image(self):
-        ret_val, img = self.camera.read()
-        if ret_val:
-            return img
-        
-        # Something is wrong
-        
-        return None
-    
-    def __del__(self):
-        self.camera.close()

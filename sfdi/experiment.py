@@ -12,30 +12,30 @@ from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
 
 from sfdi.utils import maths
-from sfdi.video import Camera, PygameProjector
-from sfdi.definitions import RESULTS_DIR, FRINGES_DIR
+
+from sfdi.generation.fringes import Fringes
+from sfdi.definitions import RESULTS_DIR
 
 class Experiment:
-    def __init__(self, camera=Camera(), projector=PygameProjector(1280, 720), debug=False):
+    def __init__(self, camera, projector, debug=False):
         self.debug = debug  # Debug mode or not
 
-        self.logger = logging.getLogger()
+        self.logger = logging.getLogger('sfdi')
 
         self.camera = camera
         self.projector = projector
 
-    def run(self, fringe_paths, refr_index, mu_a, mu_sp, run_count):
+    def run(self, refr_index, mu_a, mu_sp, run_count, fringe_paths=None):
         """
         Runs a fringe projection experiment and attempts to write the
         results to a file on disk.
 
         Args:
-            fringe_paths (str): Paths to the fringe images to be loaded.
             refr_index (float): Refractive index of the material.
             mu_a (float): Coefficient of absorption.
             mu_sp (float): Coefficient of reduced scattering.
             run_count (int): Number of times to run the experiment.
-
+            fringe_paths (list[str]): Paths to the fringe images to be loaded.
         Returns:
             None
         """
@@ -45,13 +45,25 @@ class Experiment:
         self.logger.info(f'Starting experiment')
         timestamp = f'{datetime.now().strftime("%Y%m%d_%H%M%S")}'
 
-        # Load the fringe patterns
-        fringe_patterns = [self.load_fringe_pattern(fringe) for fringe in fringe_paths]
+        if fringe_paths: # Load using provided files
+            fringe_patterns = Fringes.from_file(fringe_paths) # TODO: Add support for changing fringe input directory
+
+        else: # Generate the fringe patterns
+            fringe_patterns = Fringes.from_generator(2048, 2048, 32, n=4)
 
         # Iterate through the runs, storing the results where necessary
+
         successful = 0
         for i in range(1, run_count + 1):
             self.logger.info(f'Starting run {i}')
+            
+            # Make directory for results to go (and subdir for images) in using timestamp
+            results_dir = os.path.join(RESULTS_DIR, f'{timestamp}_{i}')
+            images_dir = os.path.join(results_dir, 'images/')
+
+            # TODO: Make cross platform
+            os.mkdir(results_dir, 0o770)
+            os.mkdir(images_dir, 0o770)
 
             # Load the images to be used (use already provided images if in debug)
             if self.debug:
@@ -61,18 +73,21 @@ class Experiment:
                 ref_imgs = self.collect_images(fringe_patterns)
                 imgs = self.collect_images(fringe_patterns)
 
+                self.save_images(ref_imgs, images_dir, prefix='ref_')
+                self.save_images(imgs, images_dir)
+
+            self.logger.info(f'Finished gathering images')
+
             # Calculate parameters
             calc_time = perf_counter()
-            #results = self.calculate(ref_imgs, imgs, refr_index, mu_a, mu_sp)
+            results = self.calculate(ref_imgs, imgs, refr_index, mu_a, mu_sp)
             calc_time = perf_counter() - calc_time
-
-            results = None
 
             successful += 1
 
             self.logger.info(f'Calculation completed in {calc_time:.2f} seconds')
 
-            self.save_results(f'{timestamp}_{i}', results, ref_imgs, imgs)
+            self.save_results(results, results_dir)
 
             self.logger.info(f'Run {i} completed')
 
@@ -82,7 +97,6 @@ class Experiment:
         f = [0, 0.2]
 
         # Calculate some constants
-
         R_eff = maths.ac_diffuse(refr_index)
         A = (1 - R_eff) / (2 * (1 + R_eff))
         mu_tr = mu_sp + mu_a
@@ -91,9 +105,10 @@ class Experiment:
         std_dev = 3
 
         # Apply some gaussian filtering
+        ref_img_ac = gaussian_filter(maths.AC(ref_imgs), std_dev)
+        ref_img_dc = gaussian_filter(maths.DC(ref_imgs), std_dev)
 
-        ref_imgs_ac = gaussian_filter(maths.AC(ref_imgs), std_dev)
-        ref_imgs_dc = gaussian_filter(maths.DC(ref_imgs), std_dev)
+        return None
 
         imgs_ac = gaussian_filter(maths.AC(imgs), std_dev)
         imgs_dc = gaussian_filter(maths.DC(imgs), std_dev)
@@ -101,8 +116,8 @@ class Experiment:
         # Get AC/DC Reflectance values using diffusion approximation
         r_ac, r_dc = maths.diffusion_approximation(refr_index, mu_a, mu_sp, f[1])
 
-        R_d_AC2 = (imgs_ac / ref_imgs_ac) * r_ac
-        R_d_DC2 = (imgs_dc / ref_imgs_dc) * r_dc
+        R_d_AC2 = (imgs_ac / ref_img_ac) * r_ac
+        R_d_DC2 = (imgs_dc / ref_img_dc) * r_dc
 
         xi = []
         x, y = R_d_AC2.shape
@@ -162,6 +177,8 @@ class Experiment:
         abs_plot = np.reshape(coeff_abs, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
         sct_plot = np.reshape(coeff_sct, (R_d_AC2.shape[0], R_d_AC2.shape[1]))
 
+        self.logger.info("Here 3")
+
         absorption = np.nanmean(abs_plot)
         absorption_std = np.std(abs_plot)
 
@@ -182,7 +199,11 @@ class Experiment:
             "scattering_std_dev" : scattering_std,
         }
 
-    def save_results(self, name, results, ref_imgs=[], imgs=[]):
+    def save_images(self, imgs, images_dir, prefix=''):
+        for i, img in enumerate(imgs):
+            cv2.imwrite(os.path.join(images_dir, f'{prefix}img{i}.jpg'), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+
+    def save_results(self, results, results_dir):
         """
         Saves some results (treated as JsonObject) subdirectory inside RESULTS_DIR with a
         given name. Optionally, any passed in images can be saved to the same directory.
@@ -196,30 +217,14 @@ class Experiment:
         Returns:
             None
         """
-        # Make directory for results to go (and subdir for images) in using timestamp
-        dir = os.path.join(RESULTS_DIR, name)
-        images_dir = os.path.join(dir, 'images/')
-
-        os.mkdir(dir, 0o770)
-        os.mkdir(images_dir, 0o770)
 
         if results:
-            with open(os.path.join(dir, 'results.json'), 'w') as outfile:
+            with open(os.path.join(results_dir, 'results.json'), 'w') as outfile:
                 json.dump(results, outfile, indent=4)
         else:
             self.logger.warning("Could not save numerical results")
 
-        for i, img in enumerate(ref_imgs):
-            cv2.imwrite(os.path.join(images_dir, f'ref_img{i}.jpg'), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-
-        for i, img in enumerate(imgs):
-            cv2.imwrite(os.path.join(images_dir, f'img{i}.jpg'), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-
         self.logger.info(f'Results saved in {dir}')
-
-    def load_fringe_pattern(self, name):
-        img = cv2.imread(os.path.join(FRINGES_DIR, name))
-        return img.astype(np.double)
 
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
@@ -242,7 +247,7 @@ class Experiment:
 
         return imgs, ref_imgs
 
-    def collect_images(self, fringe_patterns, delay=3, wait_input=False):
+    def collect_images(self, fringe_patterns, delay=1, wait_input=False, save=True):
         """
         Uses the experiment's camera and projector to gather some fringe projection
         images.
@@ -270,11 +275,13 @@ class Experiment:
             img = self.camera.capture()
             sleep(delay)
 
+            if save:
+                # TODO: Implement saving the image
+                pass
+
             imgs.append(img)
 
         return imgs
 
     def __del__(self):
-        if self.camera: del self.camera
-
         if self.projector: del self.projector
