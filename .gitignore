@@ -1,6 +1,6 @@
 # Custom paths to not include
-sfdi/data/*/*
-!sfdi/data/*/.gitkeep
+**/data/*/*
+!**/data/*/.gitkeep
 
 .vscode/
 .venv/2

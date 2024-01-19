@@ -4,8 +4,13 @@ import numpy as np
 import os
 import cv2
 
+from numpy.polynomial import Polynomial
+from numpy.polynomial.polynomial import polyval
+
 from sfdi.generation.fringes import Fringes
 from sfdi.calibration.gamma_calibration import GammaCalibration
+
+from sfdi.definitions import CALIBRATION_DIR
 
 class TestGammaCalibration(unittest.TestCase):
     def test_generation(self):
@@ -13,25 +18,25 @@ class TestGammaCalibration(unittest.TestCase):
 
         intensities = np.linspace(0, 255, intensity_count)
 
-        #img_in_dir = 'C:\\OneDrive\\OneDrive - The University of Nottingham\\university\\phd\\year1\\Code\\BlenderFPP\\Images\\gamma_calibration\\'
-        img_in_dir = 'C:\\Users\\psydw2\\OneDrive - The University of Nottingham\\university\\phd\\year1\\Code\\BlenderFPP\\Images\\gamma_calibration'
+        # TODO: Create some fake calibration images
+        form = [3.0, 2.0, 1.0] # 3x^2 + 2x + 1
+        
+        a = polyval([1, 2], form)
+        
+        # captured_imgs = []
+        
+        # coeffs, values = GammaCalibration.calculate_curve(captured_imgs, intensities, delta=0.25, order=5)
 
-        captured_imgs = []
-        for i in range(len(intensities)):
-            temp = cv2.imread(os.path.join(img_in_dir, f'result{i}.jpg')).astype(np.uint8)
-            captured_imgs.append(temp)
+        # print(f'Imported: {CALIBRATION_DIR}')
+        # GammaCalibration.save_calibration(coeffs, values) # Save the results
 
-        coeffs, values = GammaCalibration.calculate_curve(captured_imgs, intensities, delta=0.25, order=5)
+        # fringes = Fringes.from_generator(2048, 2048, 64)
 
-        GammaCalibration.save_calibration(coeffs, values) # Save the results
-
-        fringes = Fringes.from_generator(2048, 2048, 64)
-
-        # TODO: Tidy up code
-        fringes.images = [
-            GammaCalibration.apply_correction(pattern, coeffs, values.min(), values.max()) 
-            for pattern in fringes
-        ]
+        # # TODO: Tidy up code
+        # fringes.images = [
+        #     GammaCalibration.apply_correction(pattern, coeffs, values.min(), values.max()) 
+        #     for pattern in fringes
+        # ]
 
         self.assertTrue(True)
 
@@ -47,6 +52,3 @@ class TestGammaCalibration(unittest.TestCase):
 
         self.assertListEqual(test_coeffs.tolist(), coeffs.tolist())
         self.assertListEqual(test_values.tolist(), values.tolist())
-
-if __name__ == '__main__':
-    unittest.main()

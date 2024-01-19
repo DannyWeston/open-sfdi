@@ -16,6 +16,3 @@ class TestFringesCalibration(unittest.TestCase):
         fringes.save([f'fringes{i}.jpg' for i in range(len(fringes))])
 
         self.assertTrue(True)
-
-if __name__ == '__main__':
-    unittest.main()

@@ -13,6 +13,9 @@ class GammaCalibration:
         return 0.2989 * r + 0.5870 * g + 0.1140 * b
 
     def calculate_curve(imgs, interp, delta=0.25, crop_size=0.25, order=5):
+        if len(imgs) != interp.size:
+            raise Exception("Must have as many images as interpolation values")
+        
         cap_width, cap_height, _ = imgs[0].shape
 
         # Calculate region of interest values

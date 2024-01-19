@@ -49,7 +49,7 @@ class Experiment:
             fringe_patterns = Fringes.from_file(fringe_paths) # TODO: Add support for changing fringe input directory
 
         else: # Generate the fringe patterns
-            fringe_patterns = Fringes.from_generator(2048, 2048, 32, n=4)
+            fringe_patterns = Fringes.from_generator(2048, 2048, 32, n=3)
 
         # Iterate through the runs, storing the results where necessary
 
@@ -59,7 +59,7 @@ class Experiment:
             
             # Make directory for results to go (and subdir for images) in using timestamp
             results_dir = os.path.join(RESULTS_DIR, f'{timestamp}_{i}')
-            images_dir = os.path.join(results_dir, 'images/')
+            images_dir = os.path.join(results_dir, 'images')
 
             # TODO: Make cross platform
             os.mkdir(results_dir, 0o770)
@@ -224,7 +224,7 @@ class Experiment:
         else:
             self.logger.warning("Could not save numerical results")
 
-        self.logger.info(f'Results saved in {dir}')
+        self.logger.info(f'Results saved in {results_dir}')
 
     # Returns a list of n * 2 images (3 to use, 3 reference)
     def test_images(self):
