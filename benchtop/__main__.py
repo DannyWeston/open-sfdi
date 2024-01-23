@@ -11,7 +11,7 @@ logging.basicConfig(
     format = "[%(levelname)s] %(message)s"
 )
 
-from sfdi.experiment import Experiment
+from optimlab-sfdi.experiment import Experiment
 
 from benchtop.args import handle_args
 from benchtop.video import PiCamera, PygameProjector
