@@ -1,7 +1,14 @@
 import unittest
 import os
+import sys
 
-# Update definitions directory to use test directory
-from sfdi.definitions import ROOT_DIR
-ROOT_DIR = os.path.join(ROOT_DIR, 'test')
-print(f'ROOT_DIR definition set to "{ROOT_DIR}" for tests')
+# sys.path mangling to make src directory visible
+source_code = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, source_code)
+
+import sfdi
+
+# Update ROOT_DIR to use test data directory (don't want to place test stuff in production)
+from sfdi.definitions import ROOT_DIR, update_root
+
+update_root(os.path.join(ROOT_DIR), 'test')

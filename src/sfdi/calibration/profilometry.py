@@ -16,7 +16,7 @@ class PhaseHeight:
 
     def heightmap(self, phasemaps: list):
         pass
-    
+
 class ClassicPhaseHeight(PhaseHeight):
     def __init__(self, p, d, l):
         super().__init__()
