@@ -26,13 +26,14 @@ def make_structure():
     Path(CALIBRATION_DIR).mkdir(exist_ok=True)
 
 def update_root(new_root, mkdirs=True):
+    
     global ROOT_DIR
     global DATA_DIR
     global RESULTS_DIR
     global FRINGES_DIR
     global CALIBRATION_DIR
     
-    ROOT_DIR = os.path.dirname(new_root)
+    ROOT_DIR = new_root
     DATA_DIR = os.path.join(ROOT_DIR, 'data')               # IO data location
     RESULTS_DIR = os.path.join(DATA_DIR, "results")         # Directory for results to be written to
     FRINGES_DIR = os.path.join(DATA_DIR, "fringes")         # Fringes are to be used from this directory

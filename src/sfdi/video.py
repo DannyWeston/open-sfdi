@@ -31,15 +31,6 @@ class FileCamera(Camera):
         
         return img
     
-class CallbackCamera(Camera):
-    def __init__(self, cb):
-        super().__init__(settings=None)
-        
-        self._cb = cb
-        
-    def capture(self):
-        return self._cb()
-    
 class FakeCamera(Camera):
     def __init__(self, imgs):
         super().__init__(settings=None)

@@ -24,6 +24,9 @@ class Experiment:
 
         self.camera = camera
         self.projector = projector
+        
+        self.ref_cbs = []
+        self.meas_cbs = []
 
     def run(self, refr_index, mu_a, mu_sp, run_count, fringe_paths=None):
         """
@@ -49,7 +52,8 @@ class Experiment:
             fringe_patterns = Fringes.from_file(fringe_paths) # TODO: Add support for changing fringe input directory
 
         else: # Generate the fringe patterns
-            fringe_patterns = Fringes.from_generator(2048, 2048, 32, n=3)
+            fringe_patterns = Fringes.from_generator(2048, 2048, 32, np.pi, n=3)
+            fringe_patterns.save([f'fringes{i}.jpg' for i in range(len(fringe_patterns))])
 
         # Iterate through the runs, storing the results where necessary
 
@@ -70,8 +74,15 @@ class Experiment:
                 imgs, ref_imgs = self.test_images()
 
             else:
+                self.logger.info("Collecting reference images...")
                 ref_imgs = self.collect_images(fringe_patterns)
+                
+                for cb in self.ref_cbs: cb()
+                
+                self.logger.info("Collecting measurement images...")
                 imgs = self.collect_images(fringe_patterns)
+                
+                for cb in self.meas_cbs: cb()
 
                 self.save_images(ref_imgs, images_dir, prefix='ref_')
                 self.save_images(imgs, images_dir)
@@ -91,7 +102,7 @@ class Experiment:
 
             self.logger.info(f'Run {i} completed')
 
-        self.logger.info(f'{successful}/{run_count} total runs successful)')
+        self.logger.info(f'{successful}/{run_count} total runs successful')
 
     def calculate(self, ref_imgs, imgs, refr_index, mu_a, mu_sp):
         f = [0, 0.2]

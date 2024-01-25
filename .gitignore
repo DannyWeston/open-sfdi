@@ -1,6 +1,5 @@
 # Custom paths to not include
-**/data/*/*
-!**/data/*/.gitkeep
+src/data
 
 .vscode/
 .venv/2

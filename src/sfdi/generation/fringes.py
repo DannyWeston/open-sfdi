@@ -1,12 +1,11 @@
 import cv2
 import numpy as np
-
 import os
 
 from sfdi.definitions import FRINGES_DIR
 
 class Fringes:
-    def binary(width, height, freq, orientation, phase):
+    def binary(width, height, freq, orientation, phase, rgba=True):
         """
         Creates a binary fringe pattern, similar to a PWM signal.
 
@@ -25,16 +24,21 @@ class Fringes:
 
         img = Fringes.sinusoidal(width, height, freq, phase, orientation)
         width, height = img.shape
-        for col in range(width):
-            for row in range(height):
-                img[col][row] = 0 if img[col][row] < 0 else 1
+        if rgba:
+            for col in range(width):
+                for row in range(height):
+                    img[col][row][:] = 0 if img[col][row][0] < 0 else 1
+        else:
+            for col in range(width):
+                for row in range(height):
+                    img[col][row] = 0 if img[col][row] < 0 else 1
 
         return img #img.astype(np.uint8)
 
-    def sinusoidal(width, height, freq, orientation, phase):
+    def sinusoidal(width, height, freq, orientation, phase, rgba=True):
         """
         Creates a sinusoidal fringe pattern (values between -1 and 1)
-    
+
         Args:
             width (int): Width of the fringe pattern (pixels).
             height (int): Height of the fringe pattern (pixels).
@@ -47,8 +51,15 @@ class Fringes:
         x, y = np.meshgrid(np.arange(width, dtype=int), np.arange(height, dtype=int))
 
         gradient = np.sin(orientation) * x - np.cos(orientation) * y
+        
+        img = np.sin(((2.0 * np.pi * gradient) / freq) + phase)
+        
+        img = (img - img.min()) / (img.max() - img.min())   # Normalise
+        img = (img * 255.0).astype(np.uint8)                # Convert to uint8 dtype
+        
+        if rgba: return cv2.cvtColor(img, cv2.COLOR_GRAY2RGBA)
 
-        return np.sin(((2.0 * np.pi * gradient) / freq) + phase)
+        return img
 
     def __init__(self, fringe_imgs):
         self._images = fringe_imgs
@@ -64,7 +75,8 @@ class Fringes:
 
     def save(self, names, directory=FRINGES_DIR):
         for i, pattern in enumerate(self):
-            cv2.imwrite(os.path.join(directory, names[i]), pattern)
+            out = os.path.join(directory, names[i])
+            cv2.imwrite(out, pattern)
 
     @property
     def images(self):
@@ -79,8 +91,6 @@ class Fringes:
         for name in names:
             path = os.path.join(directory, name)
             imgs.append(cv2.imread(path))
-        
-        print(imgs[0].dtype)
 
         return Fringes(imgs)
 
@@ -105,14 +115,7 @@ class Fringes:
         elif fringe_type == 'Binary': gen_func = Fringes.binary
         else: raise Exception("Incorrect fringe generator function provided")
 
-        imgs = []
-        
-        for i in range(n):
-            img = gen_func(width, height, freq, orientation, (2.0 * i * np.pi) / n)
-            img = (img - img.min()) / (img.max() - img.min())   # Normalise
-            img = (img * 255.0).astype(np.uint8)                # Convert to uint8 dtype
-
-            imgs.append(img)
+        imgs = [gen_func(width, height, freq, orientation, (2.0 * i * np.pi) / n) for i in range(n)]
 
         return Fringes(imgs)
 
