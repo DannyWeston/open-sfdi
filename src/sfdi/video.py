@@ -1,16 +1,18 @@
-class Projector:
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
 
+from abc import ABC
+
+class Projector(ABC):
     def display(self, img):
         pass
+    
+    def set_resolution(width, height):
+        return self
 
-class Camera:
-    def __init__(self, settings):
-        self.settings = settings
-
+class Camera(ABC):
     def capture(self):
+        pass
+    
+    def set_resolution(self, width, height):
         pass
     
 class FileCamera(Camera):
@@ -30,7 +32,7 @@ class FileCamera(Camera):
         self._image_num = (self._image_num + 1) % len(self._images)
         
         return img
-    
+
 class FakeCamera(Camera):
     def __init__(self, imgs):
         super().__init__(settings=None)
