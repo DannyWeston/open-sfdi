@@ -1,5 +1,5 @@
 # Custom paths to not include
-src/data
+src/sfdi/data/results
 
 .vscode/
 .venv/2
