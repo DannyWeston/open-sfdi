@@ -26,7 +26,6 @@ def make_structure():
     Path(CALIBRATION_DIR).mkdir(exist_ok=True)
 
 def update_root(new_root, mkdirs=True):
-    
     global ROOT_DIR
     global DATA_DIR
     global RESULTS_DIR

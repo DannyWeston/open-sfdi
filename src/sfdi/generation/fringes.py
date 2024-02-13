@@ -2,7 +2,10 @@ import cv2
 import numpy as np
 import os
 
+from datetime import datetime
+
 from sfdi.definitions import FRINGES_DIR
+from sfdi.io.repositories import ImageRepository
 
 class Fringes:
     def binary(width, height, freq, orientation, phase, rgba=True):
@@ -61,7 +64,7 @@ class Fringes:
 
         return img
 
-    def __init__(self, fringe_imgs):
+    def __init__(self, fringe_imgs, image_repo=ImageRepository(path=FRINGES_DIR, ext=".jpg")):
         self._images = fringe_imgs
 
     def __iter__(self):
@@ -73,10 +76,11 @@ class Fringes:
     def __len__(self):
         return len(self._images)
 
-    def save(self, names, directory=FRINGES_DIR):
-        for i, pattern in enumerate(self):
-            out = os.path.join(directory, names[i])
-            cv2.imwrite(out, pattern)
+    def __getitem__(self, item):
+        return self._images[item]
+
+    def save(self):
+        return [self.image_repo.save(img) for img in self._images] if image_repo else None
 
     @property
     def images(self):
@@ -87,12 +91,7 @@ class Fringes:
         self._images = images
 
     def from_file(names, directory=FRINGES_DIR):
-        imgs = []
-        for name in names:
-            path = os.path.join(directory, name)
-            imgs.append(cv2.imread(path))
-
-        return Fringes(imgs)
+        return Fringes([self.image_repo.load(name) for name in names])
 
     def from_generator(width, height, freq, orientation=(np.pi / 2.0), n=3, fringe_type='Sinusoidal'):
         """
@@ -104,7 +103,7 @@ class Fringes:
             width (int): Width of image.
             height (int): Height of image.
             freq (float): Spatial frequency of the fringes.
-            orientation (float): Orientation of the fringes (0 = horizontal, 2pi = vertical).
+            orientation (float): Orientation of the fringes (0 = horizontal, 0.5pi = vertical).
             n (int): Number of different phases.
     
         Returns:
