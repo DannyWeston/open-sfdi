@@ -1,6 +1,5 @@
 from fringe_app.controllers import MainController
-from fringe_app.views import MainView
+from fringe_app.models import FringesModel
 
 if __name__ == "__main__":
-    mv = MainView()
-    mc = MainController(model=None, view=mv)
+    mc = MainController()
