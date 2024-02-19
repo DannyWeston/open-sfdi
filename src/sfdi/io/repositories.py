@@ -27,9 +27,9 @@ class ImageRepository(Repository):
         self.path = path
         self.ext = ext
     
-    def save(self, img):
-        name = f'{datetime.now().strftime("%Y%m%d_%H%M%S")}{self.ext}'
-        cv2.imwrite(img, os.path.join(self.path, name))
+    def save(self, img, name=None):
+        name = f'{name}{self.ext}' if name else f'{datetime.now().strftime("%Y%m%d_%H%M%S")}{self.ext}'
+        cv2.imwrite(os.path.join(self.path, name), img)
         return name
     
     def load(self, name):

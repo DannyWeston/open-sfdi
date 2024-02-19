@@ -78,12 +78,15 @@ class MainView(View, Observer):
         self.label_angle_slider = ttk.Label(self.root, text="Orientation:", width=20)
         self.label_angle_slider.grid(row=4, column=0, pady=(0, 20))
         
-        self.angle_slider = ttk.Scale(self.root, from_=0.0, to=np.pi)
-        self.angle_slider.set(90)
+        self.angle_slider = ttk.Scale(self.root, from_=0.0, to=1.0)
+        self.angle_slider.set(0)
         self.angle_slider.grid(row=4, column=1, pady=(0, 20))
         
         self.next_button = ttk.Button(self.root, text="Next")
-        self.next_button.grid(row=5, column=1)
+        self.next_button.grid(row=5, column=0)
+        
+        self.save_button = ttk.Button(self.root, text="Save")
+        self.save_button.grid(row=5, column=1)
         
         self.GARBAGE_BUG_IMG = self.model.get_fringes() # https://stackoverflow.com/questions/16424091/why-does-tkinter-image-not-show-up-if-created-in-a-function
         
@@ -122,13 +125,22 @@ class MainView(View, Observer):
         n = int(float(self.n_slider.get()))
         freq = int(float(self.freq_slider.get()))
         width = height = int(float(self.size_slider.get()))
-        orientation = float(self.angle_slider.get())
+        orientation = float(self.angle_slider.get()) * (np.pi / 2.0)
         
         return width, height, freq, orientation, n, 'Sinusoidal'
 
     def bind_commands(self):
         self.next_button.config(command=self.callbacks['next_button'])
+        self.save_button.config(command=lambda: self.callbacks['save_button'](*self.get_values()))
+        
         self.n_slider.config(command=lambda _: self.callbacks['n_slider'](*self.get_values()))
         self.freq_slider.config(command=lambda _: self.callbacks['freq_slider'](*self.get_values()))
         self.size_slider.config(command=lambda _: self.callbacks['size_slider'](*self.get_values()))
-        self.angle_slider.config(command=lambda _: self.callbacks['angle_slider'](*self.get_values()))
+        self.angle_slider.config(command=self.zero_or_one)
+        
+    def zero_or_one(self, something):
+        value = self.angle_slider.get()
+        if value != int(value): 
+            self.angle_slider.set(round(value))
+            
+        self.callbacks['angle_slider'](*self.get_values())

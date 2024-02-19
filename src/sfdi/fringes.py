@@ -56,7 +56,7 @@ class Fringes:
         img = (img - img.min()) / (img.max() - img.min())   # Normalise
         img = (img * 255.0).astype(np.uint8)                # Convert to uint8 dtype
         
-        if rgba: return cv2.cvtColor(img, cv2.COLOR_GRAY2RGBA)
+        if rgba: return cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
         return img
 
@@ -116,8 +116,8 @@ class Fringes:
             return
 
         if self._images[0].shape[2] == 3: # Already rgb
-            return 
-        
+            return
+
         self._images = [cv2.merge(img) for img in self._images]
 
 # Useful sf values for certain projectors with properties: 
