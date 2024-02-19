@@ -15,7 +15,7 @@ from scipy.interpolate import griddata
 
 from sfdi.utils import maths
 
-from sfdi.generation.fringes import Fringes
+from sfdi.fringes import Fringes
 from sfdi.definitions import RESULTS_DIR
 
 class LightCalc:

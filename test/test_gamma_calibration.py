@@ -7,7 +7,7 @@ import cv2
 from numpy.polynomial import Polynomial
 from numpy.polynomial.polynomial import polyval
 
-from sfdi.generation.fringes import Fringes
+from sfdi.fringes import Fringes
 from sfdi.calibration.gamma_calibration import GammaCalibration
 
 from sfdi.definitions import CALIBRATION_DIR

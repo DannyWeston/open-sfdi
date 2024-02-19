@@ -4,14 +4,14 @@ import numpy as np
 import cv2
 from matplotlib import pyplot as plt
 
-def display_image(img, grey=False, title=''):
+def display_image(img, grey=False, title='', vmin=0, vmax=255):
     if grey:
         cmap='gray'
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         cmap='jet'
         
-    plt.imshow(img, cmap=cmap, vmin=0, vmax=255)
+    plt.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
     plt.title(title)
     plt.show()
 

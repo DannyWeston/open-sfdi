@@ -19,7 +19,7 @@ def show_heightmap(heightmap, title='Heightmap'):
 class PhaseHeight(ABC):
     def phasemaps(self, ref_imgs, imgs):
         ref_wrapped_phase = wrapped_phase(ref_imgs)
-        measured_wrapped_phase = wrapped_phase(ref_imgs)
+        measured_wrapped_phase = wrapped_phase(imgs)
         
         # Unwrap the phase
         ref_phase = unwrapped_phase(ref_wrapped_phase)
@@ -52,7 +52,7 @@ class PolyPhaseHeight(PhaseHeight):
         
         self.coeffs = coeffs
     
-    def poly_calibrate(self, heightmap, ref_imgs, imgs, deg=1):
+    def calibrate(self, heightmap, ref_imgs, imgs, deg=1):
         ref_phase, measured_phase = self.phasemaps(ref_imgs, imgs)
         
         diff = ref_phase - measured_phase
@@ -62,9 +62,11 @@ class PolyPhaseHeight(PhaseHeight):
         for i in range(deg):
             total += np.power(diff, i)
             
-        self.coeffs = P.polyfit(diff.ravel(), heightmap.ravel(), deg=deg)[::-1]
+        # Coefficients are in ascending order
+
+        self.coeffs, stats = P.polyfit(diff.ravel(), heightmap.ravel(), deg=deg, full=True)
             
-        return self.coeffs
+        return self.coeffs, stats[0][0]
     
     def heightmap(self, ref_imgs, imgs):
         ref_phase, measured_phase = self.phasemaps(ref_imgs, imgs)
@@ -73,7 +75,8 @@ class PolyPhaseHeight(PhaseHeight):
         
         result = np.zeros(ref_phase.shape, dtype=np.float64)
         
-        for i, a_i in enumerate(coeffs):
+        for i, a_i in enumerate(self.coeffs):
+            print(f'{round(a_i, ndigits=3)} X_{i}')
             result += (np.power(diff, i) * a_i)
         
         return result

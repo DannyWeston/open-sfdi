@@ -1,11 +1,7 @@
 import cv2
 import numpy as np
-import os
-
-from datetime import datetime
 
 from sfdi.definitions import FRINGES_DIR
-from sfdi.io.repositories import ImageRepository
 
 class Fringes:
     def binary(width, height, freq, orientation, phase, rgba=True):
@@ -64,7 +60,7 @@ class Fringes:
 
         return img
 
-    def __init__(self, fringe_imgs, image_repo=ImageRepository(path=FRINGES_DIR, ext=".jpg")):
+    def __init__(self, fringe_imgs):
         self._images = fringe_imgs
 
     def __iter__(self):
@@ -79,9 +75,6 @@ class Fringes:
     def __getitem__(self, item):
         return self._images[item]
 
-    def save(self):
-        return [self.image_repo.save(img) for img in self._images] if image_repo else None
-
     @property
     def images(self):
         return self._images
@@ -90,8 +83,8 @@ class Fringes:
     def images(self, images):
         self._images = images
 
-    def from_file(names, directory=FRINGES_DIR):
-        return Fringes([self.image_repo.load(name) for name in names])
+    def from_file(names, img_repo):
+        return Fringes([img_repo.load(name) for name in names])
 
     def from_generator(width, height, freq, orientation=(np.pi / 2.0), n=3, fringe_type='Sinusoidal'):
         """
@@ -117,6 +110,15 @@ class Fringes:
         imgs = [gen_func(width, height, freq, orientation, (2.0 * i * np.pi) / n) for i in range(n)]
 
         return Fringes(imgs)
+
+    def to_rgb(self):
+        if self._images is None or len(self._images) == 0:
+            return
+
+        if self._images[0].shape[2] == 3: # Already rgb
+            return 
+        
+        self._images = [cv2.merge(img) for img in self._images]
 
 # Useful sf values for certain projectors with properties: 
 #   - Resolution:                           1024x1024

@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from sfdi.generation.fringes import Fringes
+from sfdi.fringes import Fringes
 
 class TestFringesCalibration(unittest.TestCase):
     def test_generation(self):
