@@ -1,22 +1,13 @@
 
 import numpy as np
-import cv2
 
 import logging
-import json
-import os
-
-from dataclasses import dataclass
 
 from time import sleep
-from datetime import datetime
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
 
 from sfdi.utils import maths
-
-from sfdi.fringes import Fringes
-from sfdi.definitions import RESULTS_DIR
 
 class LightCalc:
     def __init__(self, mu_a, mu_sp, refr_index, sf = [0.0, 0.2], std_dev = 3):
@@ -138,12 +129,16 @@ class ExpResult:
         del self.results[key]
 
 class Experiment:
-    def __init__(self, cameras, projector, delay=0.0, ref_cbs=[], meas_cbs=[], debug=False):
-        self.fp = FringeProjection(cameras, projector, delay, debug)
+    def __init__(self, cameras, projector, delay=0.0, debug=False):
         self.logger = logging.getLogger("sfdi")
-        
-        self.ref_cbs = ref_cbs
-        self.meas_cbs = meas_cbs
+
+        self.fp = FringeProjection(cameras, projector, delay, debug)
+
+    def on_ref_finish(self):
+        pass
+
+    def on_measurement_finish(self):
+        pass
 
     def run(self, n=3):
         if n <= 0:
@@ -152,16 +147,13 @@ class Experiment:
 
         self.logger.info(f'Starting run')
         
-        # Run the experiment n times for both reference and 
+        # Run the experiment n times for both reference and measurement images
         ref_imgs = [self.fp.run() for _ in range(n)]
+        self.on_ref_finish()
 
-        # After finishing gathering reference images run callbacks
-        for cb in self.ref_cbs: cb()
-
+        # Gather measurement images
         imgs = [self.fp.run() for _ in range(n)]
-
-        # After finishing gathering measurement images run callbacks
-        for cb in self.meas_cbs: cb()
+        self.on_measurement_finish()
         
         self.logger.info(f'Run finished')
         

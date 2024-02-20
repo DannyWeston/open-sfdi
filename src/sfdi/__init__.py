@@ -4,6 +4,13 @@ import numpy as np
 import cv2
 from matplotlib import pyplot as plt
 
+import logging
+
+logging.basicConfig(
+    level = logging.INFO, 
+    format = "[%(levelname)s] %(message)s"
+)
+
 def display_image(img, grey=False, title='', vmin=0, vmax=255):
     if grey:
         cmap='gray'

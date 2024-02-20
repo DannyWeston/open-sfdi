@@ -113,7 +113,7 @@ class MainView(View, Observer):
     def convert_image(self, img):
         if img is None: return None
         
-        pil_img = Image.fromarray(img).convert('RGB')
+        pil_img = Image.fromarray(img).convert('RGBA')
         crop_img = pil_img.resize((self.image_width, self.image_height), Image.LANCZOS) 
         
         temp = ImageTk.PhotoImage(crop_img)

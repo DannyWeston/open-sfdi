@@ -39,7 +39,6 @@ class FringesModel(Observable):
 
     def update_fringes(self, width, height, freq, orientation, n, fringe_type='Sinusoidal'):
         fringes = Fringes.from_generator(width, height, freq, orientation, n, fringe_type)
-        fringes.to_rgb()
         
         self.fringes = fringes
         self.viewing = 0

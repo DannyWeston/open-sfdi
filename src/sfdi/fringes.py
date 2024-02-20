@@ -111,15 +111,6 @@ class Fringes:
 
         return Fringes(imgs)
 
-    def to_rgb(self):
-        if self._images is None or len(self._images) == 0:
-            return
-
-        if self._images[0].shape[2] == 3: # Already rgb
-            return
-
-        self._images = [cv2.merge(img) for img in self._images]
-
 # Useful sf values for certain projectors with properties: 
 #   - Resolution:                           1024x1024
 #   - Number of line pairs:                 8
