@@ -33,7 +33,7 @@ class ImageRepository(Repository):
         return name
     
     def load(self, name):
-        return cv2.imread(os.path.join(self.path, name), 1)
+        return cv2.imread(os.path.join(self.path, name), cv2.IMREAD_COLOR) # BGR Format
 
 class ResultRepository(Repository):
     """

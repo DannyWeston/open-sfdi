@@ -6,10 +6,18 @@ from matplotlib import pyplot as plt
 
 import logging
 
-logging.basicConfig(
-    level = logging.INFO, 
-    format = "[%(levelname)s] %(message)s"
-)
+import argparse
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--debug', action='store_true')
+
+args = vars(parser.parse_args())
+
+DEBUG = args["debug"]
+
+logging.basicConfig(format = "[%(levelname)s] %(message)s")
+logging.getLogger("sfdi").setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
 def display_image(img, grey=False, title='', vmin=0, vmax=255):
     if grey:
@@ -17,7 +25,7 @@ def display_image(img, grey=False, title='', vmin=0, vmax=255):
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         cmap='jet'
-        
+
     plt.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
     plt.title(title)
     plt.show()

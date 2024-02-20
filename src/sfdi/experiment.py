@@ -129,10 +129,10 @@ class ExpResult:
         del self.results[key]
 
 class Experiment:
-    def __init__(self, cameras, projector, delay=0.0, debug=False):
+    def __init__(self, cameras, projector, delay=0.0):
         self.logger = logging.getLogger("sfdi")
 
-        self.fp = FringeProjection(cameras, projector, delay, debug)
+        self.fp = FringeProjection(cameras, projector, delay)
 
     def on_ref_finish(self):
         pass
@@ -177,10 +177,8 @@ class Experiment:
         #     self.logger.info(f'Light calculations completed in {calc_time:.2f} seconds')
 
 class FringeProjection:
-    def __init__(self, cameras, projector, delay=0.0, debug=False):
+    def __init__(self, cameras, projector, delay=0.0):
         self.logger = logging.getLogger('sfdi')
-        
-        self.debug = debug
 
         self.cameras = cameras
         self.projector = projector
@@ -207,9 +205,5 @@ class FringeProjection:
         
         if not self.projector.display(): raise StopIteration
 
-    def __collect_images(self):        
-        if self.debug:
-        # TODO: Display camera preview so positioning can be accurate by user
-            input("Press enter to take measurement")
-
+    def __collect_images(self):
         return [camera.capture() for camera in self.cameras]
