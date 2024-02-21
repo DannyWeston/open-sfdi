@@ -28,19 +28,19 @@ class PhaseHeight(ABC):
         return ref_phase, measured_phase
 
 class ClassicPhaseHeight(PhaseHeight):
-    def __init__(self, p, d, l):
+    def __init__(self, ref_dist, sensor_dist, freq):
         super().__init__()
         
-        self.p = p
-        self.d = d
-        self.l = l
+        self.ref_dist = ref_dist
+        self.sensor_dist = sensor_dist
+        self.freq = freq
     
     def heightmap(self, ref_imgs, imgs):
         ref_phase, measured_phase = self.phasemaps(ref_imgs, imgs)
 
         phase_diff = measured_phase - ref_phase
         
-        heightmap = np.divide(phase_diff * self.p * self.d, phase_diff * self.p + (2.0 * np.pi * self.l))
+        heightmap = np.divide(self.ref_dist * phase_diff, 2.0 * np.pi * self.sensor_dist * self.freq)
         
         #heightmap[heightmap <= 0] = 0 # Remove negative values
 
