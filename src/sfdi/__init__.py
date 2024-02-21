@@ -12,7 +12,9 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--debug', action='store_true')
 
-args = vars(parser.parse_args())
+args, unknown = parser.parse_known_args()
+
+args = vars(args)
 
 DEBUG = args["debug"]
 
