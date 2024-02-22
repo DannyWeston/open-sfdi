@@ -23,10 +23,14 @@ class Projector(ABC):
         return iter(self.imgs)
 
 class Camera(ABC):
-    def __init__(self, resolution=(1280, 720)):
+    def __init__(self, resolution=(1280, 720), cam_mat=None, dist_mat = None, optimal_mat=None):
         self.logger = logging.getLogger('sfdi')
         
         self.resolution = resolution
+
+        self.cam_mat = cam_mat
+        self.dist_mat = dist_mat
+        self.optimal_mat = optimal_mat
     
     @abstractmethod
     def capture(self):
@@ -35,9 +39,15 @@ class Camera(ABC):
     def set_resolution(self, res):
         self.resolution = res
 
+    def try_undistort_img(self, img):
+        if self.cam_mat is not None and self.dist_mat is not None and self.optimal_mat is not None:
+            return cv2.undistort(img, self.cam_mat, self.dist_mat, None, self.optimal_mat)
+        
+        return img
+
 class FakeCamera(Camera):
-    def __init__(self, imgs=[]):
-        super().__init__()
+    def __init__(self, imgs=[], cam_mat=None, dist_mat = None, optimal_mat=None):
+        super().__init__(cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
         
         self.img_num = 0
 
@@ -64,8 +74,8 @@ class FakeCamera(Camera):
         return self
 
 class FileCamera(FakeCamera):
-    def __init__(self, img_paths):
-        super().__init__()
+    def __init__(self, img_paths, cam_mat=None, dist_mat = None, optimal_mat=None):
+        super().__init__(cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
         
         # Load all images into memory
         for path in img_paths:

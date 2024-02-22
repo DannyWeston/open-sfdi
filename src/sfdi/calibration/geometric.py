@@ -2,9 +2,6 @@ import cv2
 import logging
 import numpy as np
 
-def undistort_img(img, cam_mat, dist_mat, optimal_mat):
-    return cv2.undistort(img, cam_mat, dist_mat, None, optimal_mat)
-
 def camera_calibration(imgs):
     logger = logging.getLogger("sfdi")
     
@@ -23,7 +20,6 @@ def camera_calibration(imgs):
 
     objectp3d = np.zeros((1, CHECKERBOARD[0] * CHECKERBOARD[1], 3), np.float32)
     objectp3d[0, :, :2] = np.mgrid[0:CHECKERBOARD[0], 0:CHECKERBOARD[1]].T.reshape(-1, 2)
-    prev_img_shape = None
 
     for i, image in enumerate(imgs):
         #image = np.array(256 - image, dtype=np.uint8)
@@ -49,9 +45,5 @@ def camera_calibration(imgs):
     if not ret: raise
 
     optimal_mat, roi = cv2.getOptimalNewCameraMatrix(cam_mat, dist_mat, (w, h), 1, (w, h))
-
-    print(f'Camera matrix: {cam_mat}')
-    print(f'Dist matrix: {dist_mat}')
-    print(f'Optimal matrix: {optimal_mat}')
     
     return cam_mat, dist_mat, optimal_mat
