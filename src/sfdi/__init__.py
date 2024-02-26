@@ -2,7 +2,8 @@ from skimage.restoration import unwrap_phase
 
 import numpy as np
 import cv2
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt    
+from mpl_toolkits.mplot3d import Axes3D
 
 import logging
 
@@ -21,6 +22,15 @@ DEBUG = args["debug"]
 logging.basicConfig(format = "[%(levelname)s] %(message)s")
 logging.getLogger("sfdi").setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
+def show_surface(data):
+    hf = plt.figure()
+    ha = hf.add_subplot(111, projection='3d')
+
+    X, Y = np.meshgrid(range(len(data[0])), range(len(data)))  # `plot_surface` expects `x` and `y` data to be 2D
+    ha.plot_surface(X, Y, data)
+
+    plt.show()
+        
 def display_image(img, grey=False, title='', vmin=0, vmax=255):
     if grey:
         cmap='gray'
