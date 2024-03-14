@@ -3,7 +3,19 @@ import sys
 
 from contextlib import contextmanager
 
-# Redirect stdout from Blender to null as we don't want it
+from abc import ABC, abstractmethod
+
+# Serialise/Deserialize libraries
+class Serializable(ABC):
+    @abstractmethod
+    def serialize(self):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def deserialize(self):
+        raise NotImplementedError
+
+# Redirect stdout to /dev/null
 @contextmanager
 def stdout_redirected(to=os.devnull):
     fd = sys.stdout.fileno()

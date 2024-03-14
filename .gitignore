@@ -1,7 +1,6 @@
 # Custom paths to not include
 src/sfdi/data/results
 
-.vscode/
 .venv/2
 **/__pycache__
 
@@ -9,6 +8,8 @@ src/sfdi/data/results
 __pycache__/
 *.py[cod]
 *$py.class
+
+src/sfdi/data/
 
 # C extensions
 *.so

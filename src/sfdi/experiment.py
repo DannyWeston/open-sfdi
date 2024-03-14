@@ -9,6 +9,8 @@ from scipy.interpolate import griddata
 
 from sfdi.utils import maths
 
+from sfdi.io.std import Serializable
+
 class LightCalc:
     def __init__(self, mu_a, mu_sp, refr_index, sf = [0.0, 0.2], std_dev = 3):
         self.mu_a = mu_a 
@@ -115,66 +117,38 @@ class LightCalc:
 
         return absorption, scattering, absorption_std, scattering_std
 
-class ExpResult:
-    def __init__(self, results=None, fringes=None, imgs=None, ref_imgs=None):
-        self.results    = dict()
-        self.fringes    = fringes
-        self.imgs       = imgs
-        self.ref_imgs   = ref_imgs
-         
-    def add_result(self, key, value):
-        self.results[key] = value
-        
-    def remove_result(self, key):
-        del self.results[key]
-
 class Experiment:
     def __init__(self, cameras, projector, delay=0.0):
         self.logger = logging.getLogger("sfdi")
 
         self.fp = FringeProjection(cameras, projector, delay)
-
-    def on_ref_finish(self):
-        pass
-
-    def on_measurement_finish(self):
-        pass
+        
+        if projector is None: raise Exception("You need a projector to run an experiment") 
+        self.projector = projector
+        
+        if len(cameras) == 0: raise Exception("You need at least 1 camera to run an experiment") 
+        self.cameras = cameras
 
     def run(self, n=3):
         if n <= 0:
-            self.logger.error("Number of measurements must be greater than 0")
-            return None
+            raise Exception("Number of measurements must be greater than 0")
 
-        self.logger.info(f'Starting run')
+        self.logger.info(f'Starting experiment')
         
         # Run the experiment n times for both reference and measurement images
-        ref_imgs = [self.fp.run() for _ in range(n)]
+        ref_imgs = np.array([self.fp.run() for _ in range(n)])
+        
         self.on_ref_finish()
 
         # Gather measurement images
-        imgs = [self.fp.run() for _ in range(n)]
-        self.on_measurement_finish()
+        imgs = np.array([self.fp.run() for _ in range(n)])
         
-        self.logger.info(f'Run finished')
+        self.logger.info(f'Experiment finished')
         
-        return ExpResult(
-                fringes=self.fp.projector,
-                imgs=imgs,
-                ref_imgs=ref_imgs
-        )
+        return np.transpose(ref_imgs, (1, 0, 2, 3, 4)), np.transpose(imgs, (1, 0, 2, 3, 4))
 
-        # if lightcalc:
-        #     calc_time = perf_counter()
-            
-        #     mu_a, mu_s, mu_a_std, mu_s_std = self.calculate(imgs, ref_imgs)
-            
-        #     results["absorption"] = mu_a
-        #     results["scattering"] = mu_s
-        #     results["absorption_std_dev"] = mu_a_std
-        #     results["scattering_std_dev"] = mu_s_std
-    
-        #     calc_time = perf_counter() - calc_time
-        #     self.logger.info(f'Light calculations completed in {calc_time:.2f} seconds')
+    def on_ref_finish(self):
+        pass
 
 class FringeProjection:
     def __init__(self, cameras, projector, delay=0.0):

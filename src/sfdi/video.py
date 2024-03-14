@@ -5,8 +5,10 @@ import logging
 import cv2
 
 class Projector(ABC):
-    def __init__(self, imgs=[]):
+    def __init__(self, imgs=[], name='Projector1'):
         self.logger = logging.getLogger('sfdi')
+        
+        self.name = name
         
         self.imgs = imgs
         
@@ -19,14 +21,23 @@ class Projector(ABC):
 
         return img
     
+    def __next__(self):
+        temp = self.display()
+        
+        if temp is None: raise StopIteration
+        
+        return temp
+    
     def __iter__(self):
-        return iter(self.imgs)
+        return self
 
 class Camera(ABC):
-    def __init__(self, resolution=(1280, 720), cam_mat=None, dist_mat = None, optimal_mat=None):
+    def __init__(self, resolution=(1280, 720), name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):
         self.logger = logging.getLogger('sfdi')
         
         self.resolution = resolution
+        
+        self.name = name
 
         self.cam_mat = cam_mat
         self.dist_mat = dist_mat
@@ -41,13 +52,14 @@ class Camera(ABC):
 
     def try_undistort_img(self, img):
         if self.cam_mat is not None and self.dist_mat is not None and self.optimal_mat is not None:
+            self.logger.debug('Undistorting camera image...')
             return cv2.undistort(img, self.cam_mat, self.dist_mat, None, self.optimal_mat)
         
         return img
 
 class FakeCamera(Camera):
-    def __init__(self, imgs=[], cam_mat=None, dist_mat = None, optimal_mat=None):
-        super().__init__(cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
+    def __init__(self, imgs=[], name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):
+        super().__init__(name='Camera1', cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
         
         self.img_num = 0
 
@@ -74,8 +86,8 @@ class FakeCamera(Camera):
         return self
 
 class FileCamera(FakeCamera):
-    def __init__(self, img_paths, cam_mat=None, dist_mat = None, optimal_mat=None):
-        super().__init__(cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
+    def __init__(self, img_paths, name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):
+        super().__init__(name='Camera1', cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
         
         # Load all images into memory
         for path in img_paths:

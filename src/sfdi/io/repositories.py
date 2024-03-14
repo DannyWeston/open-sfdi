@@ -1,83 +1,180 @@
 import cv2
 import logging
 import os
+import pickle
 
 from abc import ABC, abstractmethod
 
-from sfdi.definitions import RESULTS_DIR
+from sfdi.io.std import Serializable
 
 from datetime import datetime
 
-class Repository(ABC):
-    def __init__(self):
-        self.logger = logging.getLogger('sfdi')
-    
+class Repo(ABC):
     @abstractmethod
-    def save(self, value):
+    def commit(self):
+        pass
+
+class ImageRepo(Repo):
+    @abstractmethod
+    def add_image(self, img, name):
         raise NotImplementedError
     
     @abstractmethod
-    def load(self, value):
+    def load_image(self, name):
+        raise NotImplementedError
+
+class ResultRepo(Repo):
+    @abstractmethod
+    def add_fringe(self, imgs, name):
         raise NotImplementedError
     
-class ImageRepository(Repository):
-    def __init__(self, path, ext=".jpg"):
-        super().__init__()
-        
-        self.path = path
-        self.ext = ext
+    @abstractmethod
+    def add_image(self, imgs, name):
+        raise NotImplementedError
+
+    @abstractmethod
+    def add_ref_image(self, imgs, name):
+        raise NotImplementedError
     
-    def save(self, img, name=None):
-        name = f'{name}{self.ext}' if name else f'{datetime.now().strftime("%Y%m%d_%H%M%S")}{self.ext}'
-        cv2.imwrite(os.path.join(self.path, name), img)
-        return name
+    @abstractmethod
+    def add_heightmap(self, heightmap, name):
+        raise NotImplementedError
     
-    def load(self, name):
-        return cv2.imread(os.path.join(self.path, name), cv2.IMREAD_COLOR) # BGR Format
+    @abstractmethod
+    def load_fringe(self, name):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def load_image(self, name):
+        raise NotImplementedError
 
-class ResultRepository(Repository):
-    """
-        Saves some results (treated as JsonObject) subdirectory inside RESULTS_DIR with a
-        given name. Optionally, any passed in images can be saved to the same directory.
+    @abstractmethod
+    def load_ref_image(self, name):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def load_heightmap(self, name):
+        raise NotImplementedError
 
-        Args:
-            name (str): Name of the directory to be created.
-            results (dict): collection of results (representing JSON).
-            ref_imgs (list): Optional - collected reference images to save.
-            imgs (list): Optional - collected images to save.
+class CalibrationRepo(Repo):
+    @abstractmethod
+    def add_gamma(self, data):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def add_lens(self, data):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def add_proj(self, data):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def load_gamma(self, cam_name):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def load_lens(self, cam_name):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def load_proj(self, proj_name):
+        raise NotImplementedError
 
-        Returns:
-            None
-    """
-    def __init__(self, path=RESULTS_DIR):
-        super().__init__()
-        self.path = path
+### CONCRETE IMPLEMENTATIONS ###
+
+class BinRepo(Repo):
+    def __init__(self, file):
+        self._file = file
         
-        self.directory = os.path.join(path, str(datetime.now().strftime("%Y%m%d_%H%M%S")))
-        os.mkdir(self.directory, 0o770)
+        self._outdated = True
+        self._load_cache = None
 
-    def save(self, expresult):
-        if expresult.results: # Save numerical results
-            with open(os.path.join(self.directory, 'results.json'), 'w') as outfile:
-                json.dump(expresult.results, outfile, indent=4)
+        self._changes = []
 
-        if expresult.fringes: # Save used fringe patterns
-            for i, img in enumerate(expresult.fringes):
-                cv2.imwrite(os.path.join(self.directory, f'fringes{i}.jpg'), img)
+    def add_bin(self, data):
+        self._changes.append(data)
 
-        if expresult.imgs: # Save recorded images for each camera
-            for i, imgs in enumerate(expresult.imgs):
-                for cam_i, img in enumerate(imgs):
-                    cv2.imwrite(os.path.join(self.directory, f'cam{cam_i}_img{i}.jpg'), img)
+    def load_bin(self):
+        if self._outdated:
+            with open(os.path.join(self._file), 'rb') as infile:
+                self._load_cache = pickle.load(infile)
+                
+            self._outdated = False
             
-        if expresult.ref_imgs: # Save recorded reference images for each camera
-            for i, imgs in enumerate(expresult.ref_imgs):
-                for cam_i, img in enumerate(imgs):
-                    cv2.imwrite(os.path.join(self.directory, f'cam{cam_i}_refimg{i}.jpg'), img)
-                    
-        self.logger.info(f"Results saved in {self.directory}")
-                    
-        return self.directory
+        return self._load_cache
 
-    def load(self):
-        raise NotImplementedError
+    def commit(self):
+        out = {}
+        for d in self._changes:
+            out = out | d
+        
+        with open(os.path.join(self._file), 'wb') as outfile:
+            pickle.dump(out, outfile, protocol=pickle.HIGHEST_PROTOCOL)
+
+        self._outdated = True
+
+class FileImageRepo(ImageRepo):
+    def __init__(self, path):
+        self._path = path
+        self._changes = {}
+
+    def add_image(self, img, name):
+        self._changes[name] = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+
+    def load_image(self, name):
+        # BGR Format
+        return cv2.imread(os.path.join(self._path, name), cv2.IMREAD_COLOR)
+
+    def commit(self):
+        # Write all images
+        for name, img in self._changes.items():
+            cv2.imwrite(os.path.join(self._path, name), img)
+
+        self._changes = dict()
+
+class BinCalibrationRepo(CalibrationRepo):
+    def __init__(self, file):
+        self._repo = BinRepo(file)
+        
+        self._data = dict()
+
+    def add_gamma(self, data):
+        cam_name = data.camera.name
+        
+        self.__if_ne(cam_name)
+        
+        self._data[cam_name]["gamma"] = data.serialize()
+    
+    def add_lens(self, data):
+        cam_name = data.camera.name
+        
+        self.__if_ne(cam_name)
+        
+        self._data[cam_name]["lens"] = data.serialize()
+
+    def add_proj(self, data):
+        projector = data.projector.name
+        
+        self._data[proj_name] = data.serialize()
+    
+    def load_gamma(self, cam_name):
+        data = self._repo.load_bin()[cam_name]
+        return data["gamma"]
+    
+    def load_lens(self, cam_name):
+        data = self._repo.load_bin()[cam_name]
+        return data["lens"]
+    
+    def load_proj(self, proj_name):
+        #data = self._repo.load_bin()[proj_name]
+        return None
+    
+    def commit(self):
+        self._repo.add_bin(self._data)
+        
+        self._repo.commit()
+        
+    def __if_ne(self, name):
+        if not (name in self._data):
+            self._data[name] = dict()

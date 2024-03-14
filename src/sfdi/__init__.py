@@ -24,28 +24,38 @@ logging.getLogger("sfdi").setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
 def show_surface(data):
     hf = plt.figure()
+
     ha = hf.add_subplot(111, projection='3d')
 
     X, Y = np.meshgrid(range(len(data[0])), range(len(data)))  # `plot_surface` expects `x` and `y` data to be 2D
-    ha.plot_surface(X, Y, data)
+    temp = np.mean(data, axis=2) if data.ndim == 3 else data
+    ha.plot_surface(X, Y, temp)
 
     plt.show()
-        
-def display_image(img, grey=False, title='', vmin=0, vmax=255):
+
+def display_image(img, grey=False, title='', vmin=0.0, vmax=1.0):
     if grey:
         cmap='gray'
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = cv2.normalize(img, None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
         cmap='jet'
 
     plt.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
     plt.title(title)
     plt.show()
 
-def centre_crop_img(img, x1, y1, x2=None, y2=None):
-    x3 = x2 if x2 else -x1
-    y3 = y2 if y2 else -y1
-    return img[x1 : x3, y1 : y3]
+def centre_crop_img(img, x1, y1, x2:int = 0, y2:int = 0):
+    if x2 == 0:
+        x2 = img.shape[1] if x1 == 0 else -x1
+        
+    if y2 == 0:
+        y2 = img.shape[0] if y1 == 0 else -y1
+    
+    return img[y1 : y2, x1 : x2]
+
+def normalise_image(img):
+    return ((img - img.min()) / (img.max() - img.min()))
 
 def rgb2grey(img):
     r, g, b = img[:,:,0], img[:,:,1], img[:,:,2]
@@ -55,32 +65,28 @@ def unwrapped_phase(phi_imgs):
     return unwrap_phase(phi_imgs)
 
 def wrapped_phase(imgs):
-    p = q = 0
+    p = np.zeros(imgs[0].shape, dtype=np.float32)
+    q = np.zeros(imgs[0].shape, dtype=np.float32)
 
     for i, img in enumerate(imgs):
         phase = (2.0  * np.pi * i) / len(imgs)
-        p += img * np.sin(phase)
-        q += img * np.cos(phase)
+        p = np.add(p, img * np.sin(phase), dtype=np.float32)
+        q = np.add(q, img * np.cos(phase), dtype=np.float32)
 
-    return -np.arctan2(p, q)
+    return np.negative(np.arctan2(p, q), dtype=np.float32)
 
 def ac_imgs(imgs: list):
-    total = 0
-    for img in imgs:
-        total += img
-        
-    return (1.0 / len(imgs)) * total
+    return np.divide(np.sum(imgs, axis=0), len(imgs))
 
 def dc_imgs(imgs: list):
     N = len(imgs)
     
-    p = 0
-    q = 0
+    p = q = np.zeros(imgs[0].shape, dtype=np.float32)
     
     for i, img in enumerate(imgs):
-        phase = (2.0 * np.pi * i) / N 
+        phase = (2.0 * np.pi * i) / N
         
-        p += img * np.sin(phase)
-        q += img * np.cos(phase)
+        p = np.add(p, img * np.sin(phase))
+        q = np.add(q, img * np.cos(phase))
         
     return (2.0 / N) * np.sqrt((p * p) + (q * q))
