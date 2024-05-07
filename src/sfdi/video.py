@@ -5,31 +5,53 @@ import logging
 import cv2
 
 class Projector(ABC):
-    def __init__(self, imgs=[], name='Projector1'):
+    @abstractmethod
+    def __init__(self, name):
         self.logger = logging.getLogger('sfdi')
-        
+
         self.name = name
         
-        self.imgs = imgs
-        
-        self.img_num = 0
-
+    @abstractmethod
     def display(self):
-        img = self.imgs[self.img_num]
-        
-        self.img_num = (self.img_num + 1) % len(self.imgs)
+        pass
 
-        return img
-    
-    def __next__(self):
-        temp = self.display()
+class ImageProjector(Projector):
+    @abstractmethod
+    def __init__(self, name):
+        super().__init__(name)
         
-        if temp is None: raise StopIteration
+        self.img = None
+
+    @abstractmethod
+    def set_image(self, img):
+        self.img = img
+
+    @abstractmethod
+    def display(self):
+        return self.img
+
+class FringeProjector(Projector):
+    @abstractmethod
+    def __init__(self, name, phase_count, frequency, orientation, resolution):
+        super().__init__(name)
         
-        return temp
+        self.phase_count = phase_count
+        
+        self.frequency = frequency
+        
+        self.orientation = orientation
+        
+        self.resolution = resolution
+        
+        self.current = 0
+
+    @abstractmethod
+    def display(self):
+        pass
     
-    def __iter__(self):
-        return self
+    def next_phase(self):
+        self.current = (self.current + 1) % self.phase_count
+
 
 class Camera(ABC):
     def __init__(self, resolution=(1280, 720), name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):

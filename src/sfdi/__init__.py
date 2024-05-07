@@ -6,7 +6,6 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 import logging
-
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -19,8 +18,16 @@ args = vars(args)
 
 DEBUG = args["debug"]
 
-logging.basicConfig(format = "[%(levelname)s] %(message)s")
-logging.getLogger("sfdi").setLevel(logging.DEBUG if DEBUG else logging.INFO)
+logger = logging.getLogger('sfdi')
+
+#formatter = logging.Formatter(fmt='%(threadName)s:%(message)s')
+formatter = logging.Formatter(fmt='[%(levelname)s] %(message)s')
+
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
 def show_surface(data):
     hf = plt.figure()

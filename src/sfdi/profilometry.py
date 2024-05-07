@@ -68,8 +68,8 @@ class ClassicPhaseHeight(PhaseHeight):
         self.d = d 
         self.l = l
     
-    def heightmap(self, ref_imgs, imgs, grey=False, crop=None):
-        if grey:
+    def heightmap(self, ref_imgs, imgs, convert_grey=False, crop=None):
+        if convert_grey:
             imgs = np.array([rgb2grey(img) for img in imgs])
             ref_imgs = np.array([rgb2grey(img) for img in ref_imgs])
   

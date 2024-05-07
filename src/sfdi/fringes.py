@@ -1,67 +1,59 @@
 import cv2
+
 import numpy as np
+
 
 from sfdi.definitions import FRINGES_DIR
 
-class Fringes:
-    def binary(width, height, freq, orientation, phase, rgba=True):
-        # Maybe not a good idea to rely upon sinusoidal function
-        # But works for now :)
+class FringeFactory:
+    @staticmethod
+    def MakeBinary(frequency, phase_count, orientation, width=1024, height=1024):
+        # Maybe not a good idea to rely upon sinusoidal function but works for now :)
+        imgs = FringeGenerator.MakeSinusoidal(frequency, phase_count, orientation, rgba, width, height)
 
-        img = Fringes.sinusoidal(width, height, freq, phase, orientation)
-        width, height = img.shape
-        if rgba:
+        width, height, _ = imgs[0].shape
+        
+        for i in range(phase_count):
             for col in range(width):
                 for row in range(height):
-                    img[col][row][:] = 0.0 if img[col][row][0] < 0.5 else 1.0
-        else:
-            for col in range(width):
-                for row in range(height):
-                    img[col][row] = 0.0 if img[col][row] < 0.5 else 1.0
+                    imgs[i][col][row] = 0.0 if imgs[i][col][row] < 0.5 else 1.0
 
-        return img
+        return imgs
 
-    def sinusoidal(width, height, freq, orientation, phase, rgba=True):
-        x, y = np.meshgrid(np.arange(width, dtype=int), np.arange(height, dtype=int))
-
-        gradient = np.sin(orientation) * x - np.cos(orientation) * y
+    @staticmethod
+    def MakeBinaryRGB(frequency, phase_count, orientation, width=1024, height=1024):
+        imgs = FringeFactory.MakeBinary(frequency, phase_count, orientation, width, height)
         
-        img = np.sin(((2.0 * np.pi * gradient) / freq) + phase)
+        return FringeGenerator.GrayToRGB(imgs)
+
+    @staticmethod
+    def MakeSinusoidal(frequency, phase_count, orientation, width=1024, height=1024):
+        imgs = np.empty((phase_count, width, height))
         
-        img = cv2.normalize(img, None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
+        for i in range(phase_count):
+            x, y = np.meshgrid(np.arange(width, dtype=int), np.arange(height, dtype=int))
+
+            gradient = np.sin(orientation) * x - np.cos(orientation) * y
+
+            imgs[i] = np.sin(((2.0 * np.pi * gradient) / freq) + phase)
+            
+            imgs[i] = cv2.normalize(img[i], None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
         
-        if rgba: return cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        return imgs
 
-        return img
+    @staticmethod
+    def MakeSinusoidalRGB(frequency, phase_count, orientation, width=1024, height=1024):
+        imgs = FringeFactory.MakeSinusoidal(frequency, phase_count, orientation, width, height)
+        
+        return FringeGenerator.GrayToRGB(imgs)
 
-    def __init__(self, fringe_imgs):
-        self._images = fringe_imgs
-
-    def __iter__(self):
-        return iter(self._images)
-
-    def __next__(self):
-        return next(self._images)
-
-    def __len__(self):
-        return len(self._images)
-
-    def __getitem__(self, item):
-        return self._images[item]
-
-    @property
-    def images(self):
-        return self._images
-
-    @images.setter
-    def images(self, images):
-        self._images = images
-
-    def from_generator(width, height, freq, orientation=(np.pi / 2.0), n=3, fringe_type='Sinusoidal'):
-        if fringe_type == 'Sinusoidal': gen_func = Fringes.sinusoidal
-        elif fringe_type == 'Binary': gen_func = Fringes.binary
-        else: raise Exception("Incorrect fringe generator function provided")
-
-        imgs = np.array([gen_func(width, height, freq, orientation, (2.0 * i * np.pi) / n) for i in range(n)])
-
-        return Fringes(imgs)
+    @staticmethod
+    def GrayToRGB(imgs):
+        count, width, height = imgs.shape
+        
+        rgb_imgs = np.empty((count, width, height, 3))
+        
+        for i in range(phase_count):
+           rgb_imgs[i] = cv2.cvtColor(imgs[i], cv2.COLOR_GRAY2RGB)
+           
+        return rgb_imgs

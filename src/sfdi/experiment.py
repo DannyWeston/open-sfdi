@@ -7,9 +7,50 @@ from time import sleep
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
 
+from sfdi.profilometry import ClassicPhaseHeight
+from sfdi.video import FringeProjector
 from sfdi.utils import maths
-
 from sfdi.io.std import Serializable
+
+class Photogrammetry:
+    def __init__(self, cameras, delay):
+        if len(cameras) < 2: raise Exception("You need at least 2 cameras to run an experiment") 
+        
+        self.logger = logging.getLogger('sfdi')
+        self.cameras = cameras
+        self.delay = delay
+        
+    def run(self):
+        if 0 < self.delay: sleep(self.delay)
+        return [camera.capture() for camera in self.cameras]
+
+class FringeProjection:
+    def __init__(self, cameras, projector: FringeProjector, delay=0.0):
+        if projector is None: raise Exception("You need a projector to run an experiment")
+        if len(cameras) == 0: raise Exception("You need at least 1 camera to run an experiment") 
+        
+        self.logger = logging.getLogger('sfdi')
+        
+        self.cameras = cameras
+        self.projector = projector
+        self.delay = delay
+
+    def run(self):
+        self.projector.display()
+        if 0 < self.delay: sleep(self.delay)
+        return [camera.capture() for camera in self.cameras]
+    
+    def next_phase(self):
+        self.projector.next_phase()
+
+""" 
+    def stream(self):
+        self.stream = True
+        
+        while self.stream:
+            yield self.run()
+            
+        self.logger.info('Finished streaming') """
 
 class LightCalc:
     def __init__(self, mu_a, mu_sp, refr_index, sf = [0.0, 0.2], std_dev = 3):
@@ -118,66 +159,100 @@ class LightCalc:
         return absorption, scattering, absorption_std, scattering_std
 
 class Experiment:
-    def __init__(self, cameras, projector, delay=0.0):
+    def __init__(self, test):
         self.logger = logging.getLogger("sfdi")
 
-        self.fp = FringeProjection(cameras, projector, delay)
+        self.test = test
         
-        if projector is None: raise Exception("You need a projector to run an experiment") 
-        self.projector = projector
-        
-        if len(cameras) == 0: raise Exception("You need at least 1 camera to run an experiment") 
-        self.cameras = cameras
-
-    def run(self, n=3):
-        if n <= 0:
-            raise Exception("Number of measurements must be greater than 0")
-
-        self.logger.info(f'Starting experiment')
-        
-        # Run the experiment n times for both reference and measurement images
-        ref_imgs = np.array([self.fp.run() for _ in range(n)])
-        
-        self.on_ref_finish()
-
-        # Gather measurement images
-        imgs = np.array([self.fp.run() for _ in range(n)])
-        
-        self.logger.info(f'Experiment finished')
-        
-        return np.transpose(ref_imgs, (1, 0, 2, 3, 4)), np.transpose(imgs, (1, 0, 2, 3, 4))
-
-    def on_ref_finish(self):
-        pass
-
-class FringeProjection:
-    def __init__(self, cameras, projector, delay=0.0):
-        self.logger = logging.getLogger('sfdi')
-
-        self.cameras = cameras
-        self.projector = projector
-        self.delay = delay
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        self.__project_image()
-        if 0.0 < self.delay: sleep(self.delay)
-        return self.__collect_images()
-
-    def run(self):
-        self.__project_image()
-        if 0 < self.delay: sleep(self.delay)
-        return self.__collect_images()
+        self.streaming = False
 
     def stream(self):
-        while True: yield self.run()
-
-    def __project_image(self):
-        if not self.projector: return
+        self.streaming = True
         
-        if not self.projector.display(): raise StopIteration
+        while self.streaming:
+            yield self.run()
+            
+        self.logger.info('Finished streaming')
 
-    def __collect_images(self):
-        return [camera.capture() for camera in self.cameras]
+    # Subclass Experiment to declare your own default run behaviour
+    def run(self):
+        self.logger.info(f'Taking a measurement')
+        
+        result = self.test.run()
+        
+        return result
+
+class FPExperiment(Experiment):
+    def __init__(self, test: FringeProjection):
+        super().__init__(test)
+
+    # Subclass Experiment to declare your own default run behaviour
+    def run(self):
+        self.logger.info(f'Taking a measurement')
+        
+        result = self.test.run()
+        
+        return result
+
+class NStepFPExperiment(FPExperiment):
+    def __init__(self, test: FringeProjection):
+        super().__init__(test)
+        
+        self._pre_cbs = []
+        self._post_cbs = []
+
+        if test.projector.phase_count < 3: raise Exception("You need at least 3 steps to run an experiment")
+        
+    def run(self):
+        # Run the experiment n times for both reference and measurement images
+        steps = self.test.projector.phase_count
+        
+        # Run pre-reference image callbacks
+        for cb in self._pre_cbs: cb()
+        
+        ref_imgs = []
+        for i in range(steps):
+            ref_imgs.append(self.test.run())
+            self.test.next_phase()
+            
+        # Run post-ref callbacks
+        for cb in self._post_cbs: cb()
+        
+        imgs = []
+        for i in range(steps):
+            imgs.append(self.test.run())
+            self.test.next_phase()
+        
+        self.logger.info(f'Measurement completed')
+        
+        ref_imgs = np.transpose(ref_imgs, (1, 0, 2, 3, 4))
+        imgs = np.transpose(imgs, (1, 0, 2, 3, 4))
+        
+        return ref_imgs, imgs
+
+    def classic_ph(self, ref_imgs, imgs, sf, cam_plane_dists, cam_proj_dists):
+        cameras = imgs.shape[0]
+        
+        if len(cam_plane_dists) != cameras:
+            raise Exception("You must provide a distance for all cameras to the ref plane")
+            return None
+        
+        if len(cam_proj_dists) != cameras:
+            raise Exception("You must provide a distance for all cameras to the projector")
+            return None
+        
+        heightmaps = []
+        
+        for i in range(cameras):
+            ph = ClassicPhaseHeight(sf, cam_plane_dists[i], cam_proj_dists[i])
+            heightmap = ph.heightmap(ref_imgs[i], imgs[i], convert_grey=True, crop=None)
+            
+            heightmaps.append(heightmap)
+        
+        return heightmaps
+
+    def add_pre_ref_callback(self, cb):
+        self._pre_cbs.append(cb)
+        
+    def add_post_ref_callback(self, cb):
+        self._post_cbs.append(cb)
