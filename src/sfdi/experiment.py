@@ -40,8 +40,8 @@ class FringeProjection:
         if 0 < self.delay: sleep(self.delay)
         return [camera.capture() for camera in self.cameras]
     
-    def next_phase(self):
-        self.projector.next_phase()
+    def next(self):
+        self.projector.next()
 
 """ 
     def stream(self):
@@ -165,7 +165,9 @@ class Experiment:
         self.test = test
         
         self.streaming = False
-
+    
+        self.save_results = False
+    
     def stream(self):
         self.streaming = True
         
@@ -195,33 +197,37 @@ class FPExperiment(Experiment):
         return result
 
 class NStepFPExperiment(FPExperiment):
-    def __init__(self, test: FringeProjection):
+    def __init__(self, test: FringeProjection, steps=3):
         super().__init__(test)
         
         self._pre_cbs = []
         self._post_cbs = []
 
-        if test.projector.phase_count < 3: raise Exception("You need at least 3 steps to run an experiment")
-        
+        self.steps = steps
+
+        proj_phases = len(test.projector.phases)
+
+        if proj_phases < self.steps: 
+            raise Exception(f"You need {steps} phases to run a {steps}-step experiment ({proj_phases} provided)")
+
     def run(self):
         # Run the experiment n times for both reference and measurement images
-        steps = self.test.projector.phase_count
         
         # Run pre-reference image callbacks
         for cb in self._pre_cbs: cb()
         
         ref_imgs = []
-        for i in range(steps):
+        for _ in range(self.steps):
             ref_imgs.append(self.test.run())
-            self.test.next_phase()
+            self.test.next()
             
         # Run post-ref callbacks
         for cb in self._post_cbs: cb()
         
         imgs = []
-        for i in range(steps):
+        for _ in range(self.steps):
             imgs.append(self.test.run())
-            self.test.next_phase()
+            self.test.next()
         
         self.logger.info(f'Measurement completed')
         

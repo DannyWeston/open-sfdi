@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 import logging
+import sys
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -23,7 +24,7 @@ logger = logging.getLogger('sfdi')
 #formatter = logging.Formatter(fmt='%(threadName)s:%(message)s')
 formatter = logging.Formatter(fmt='[%(levelname)s] %(message)s')
 
-handler = logging.StreamHandler()
+handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(formatter)
 
 logger.addHandler(handler)
