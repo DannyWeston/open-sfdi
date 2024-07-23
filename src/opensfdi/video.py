@@ -7,7 +7,7 @@ import cv2
 class Projector(ABC):
     @abstractmethod
     def __init__(self, name):
-        self.logger = logging.getLogger('sfdi')
+        self.logger = logging.getLogger('opensfdi')
 
         self.name = name
         
@@ -61,7 +61,7 @@ class FringeProjector(Projector):
 
 class Camera(ABC):
     def __init__(self, resolution=(1280, 720), name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):
-        self.logger = logging.getLogger('sfdi')
+        self.logger = logging.getLogger('opensfdi')
         
         self.resolution = resolution
         

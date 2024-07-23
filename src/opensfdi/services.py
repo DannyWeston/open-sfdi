@@ -4,12 +4,12 @@ import numpy as np
 
 from datetime import datetime
 
-from sfdi.io.repositories import ImageRepo, FileImageRepo, CalibrationRepo, BinRepo, BinCalibrationRepo
-from sfdi.definitions import RESULTS_DIR, CALIBRATION_DIR
+from opensfdi.io.repositories import ImageRepo, FileImageRepo, CalibrationRepo, BinRepo, BinCalibrationRepo
+from opensfdi.definitions import RESULTS_DIR, CALIBRATION_DIR
 
 class CalibrationService():
     def __init__(self, data_repo:CalibrationRepo = None):       
-        self._logger = logging.getLogger('sfdi')
+        self._logger = logging.getLogger('opensfdi')
 
         self._data_repo = data_repo
 
@@ -41,7 +41,7 @@ class CalibrationService():
 
 class ResultService():
     def __init__(self, data_repo:BinRepo, image_repo:ImageRepo):
-        self._logger = logging.getLogger('sfdi')
+        self._logger = logging.getLogger('opensfdi')
         
         self._data_repo = data_repo
         self._image_repo = image_repo

@@ -7,16 +7,15 @@ from time import sleep
 from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
 
-from sfdi.profilometry import ClassicPhaseHeight
-from sfdi.video import FringeProjector
-from sfdi.utils import maths
-from sfdi.io.std import Serializable
+from opensfdi.profilometry import ClassicPhaseHeight
+from opensfdi.video import FringeProjector
+from opensfdi.utils import maths
 
 class Photogrammetry:
     def __init__(self, cameras, delay):
         if len(cameras) < 2: raise Exception("You need at least 2 cameras to run an experiment") 
         
-        self.logger = logging.getLogger('sfdi')
+        self.logger = logging.getLogger('opensfdi')
         self.cameras = cameras
         self.delay = delay
         
@@ -26,10 +25,13 @@ class Photogrammetry:
 
 class FringeProjection:
     def __init__(self, cameras, projector: FringeProjector, delay=0.0):
-        if projector is None: raise Exception("You need a projector to run an experiment")
-        if len(cameras) == 0: raise Exception("You need at least 1 camera to run an experiment") 
+        if projector is None: 
+            raise Exception("You need a projector to run an experiment")
         
-        self.logger = logging.getLogger('sfdi')
+        if len(cameras) == 0: 
+            raise Exception("You need at least 1 camera to run an experiment") 
+        
+        self.logger = logging.getLogger('opensfdi')
         
         self.cameras = cameras
         self.projector = projector
@@ -160,7 +162,7 @@ class LightCalc:
 
 class Experiment:
     def __init__(self, test):
-        self.logger = logging.getLogger("sfdi")
+        self.logger = logging.getLogger("opensfdi")
 
         self.test = test
         

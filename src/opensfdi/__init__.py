@@ -2,8 +2,7 @@ from skimage.restoration import unwrap_phase
 
 import numpy as np
 import cv2
-from matplotlib import pyplot as plt    
-from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import pyplot as plt
 
 import logging
 import sys
@@ -19,7 +18,7 @@ args = vars(args)
 
 DEBUG = args["debug"]
 
-logger = logging.getLogger('sfdi')
+logger = logging.getLogger('opensfdi')
 
 #formatter = logging.Formatter(fmt='%(threadName)s:%(message)s')
 formatter = logging.Formatter(fmt='[%(levelname)s] %(message)s')

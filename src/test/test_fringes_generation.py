@@ -4,7 +4,7 @@ import unittest
 import numpy as np
 
 
-from sfdi.fringes import FringeGenerator
+from opensfdi.fringes import FringeGenerator
 
 
 class TestFringesCalibration(unittest.TestCase):

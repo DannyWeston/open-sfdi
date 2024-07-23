@@ -2,14 +2,11 @@ import cv2
 
 import numpy as np
 
-
-from sfdi.definitions import FRINGES_DIR
-
 class FringeFactory:
     @staticmethod
     def MakeBinary(frequency, phase_count, orientation, width=1024, height=1024):
         # Maybe not a good idea to rely upon sinusoidal function but works for now :)
-        imgs = FringeGenerator.MakeSinusoidal(frequency, phase_count, orientation, rgba, width, height)
+        imgs = FringeFactory.MakeSinusoidal(frequency, phase_count, orientation, width, height)
 
         width, height, _ = imgs[0].shape
         
@@ -24,7 +21,7 @@ class FringeFactory:
     def MakeBinaryRGB(frequency, phase_count, orientation, width=1024, height=1024):
         imgs = FringeFactory.MakeBinary(frequency, phase_count, orientation, width, height)
         
-        return FringeGenerator.GrayToRGB(imgs)
+        return FringeFactory.GrayToRGB(imgs)
 
     @staticmethod
     def MakeSinusoidal(frequency, phase_count, orientation, width=1024, height=1024):
@@ -35,9 +32,9 @@ class FringeFactory:
 
             gradient = np.sin(orientation) * x - np.cos(orientation) * y
 
-            imgs[i] = np.sin(((2.0 * np.pi * gradient) / freq) + phase)
+            imgs[i] = np.sin(((2.0 * np.pi * gradient) / frequency) + phase_count)
             
-            imgs[i] = cv2.normalize(img[i], None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
+            imgs[i] = cv2.normalize(imgs[i], None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
         
         return imgs
 
@@ -45,7 +42,7 @@ class FringeFactory:
     def MakeSinusoidalRGB(frequency, phase_count, orientation, width=1024, height=1024):
         imgs = FringeFactory.MakeSinusoidal(frequency, phase_count, orientation, width, height)
         
-        return FringeGenerator.GrayToRGB(imgs)
+        return FringeFactory.GrayToRGB(imgs)
 
     @staticmethod
     def GrayToRGB(imgs):
@@ -53,7 +50,7 @@ class FringeFactory:
         
         rgb_imgs = np.empty((count, width, height, 3))
         
-        for i in range(phase_count):
+        for i in range(count):
            rgb_imgs[i] = cv2.cvtColor(imgs[i], cv2.COLOR_GRAY2RGB)
            
         return rgb_imgs

@@ -1,5 +1,4 @@
 import numpy as np
-import sfdi
 
 from matplotlib import pyplot as plt
 from numpy.polynomial import polynomial as P
@@ -7,7 +6,7 @@ from numpy.polynomial import polynomial as P
 from abc import ABC
 from stl import mesh
 
-from sfdi import wrapped_phase, unwrapped_phase, centre_crop_img, rgb2grey, display_image
+from opensfdi import wrapped_phase, unwrapped_phase, centre_crop_img, rgb2grey
 
 def show_heightmap(heightmap, title='Heightmap'):
     x, y = np.meshgrid(range(heightmap.shape[0]), range(heightmap.shape[1]))

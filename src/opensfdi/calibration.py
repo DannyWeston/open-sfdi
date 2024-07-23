@@ -4,10 +4,10 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-from sfdi import DEBUG
-from sfdi import rgb2grey, display_image
-from sfdi.definitions import CALIBRATION_DIR
-from sfdi.io.std import Serializable
+from opensfdi import DEBUG
+from opensfdi import rgb2grey, display_image
+from opensfdi.definitions import CALIBRATION_DIR
+from opensfdi.io.std import Serializable
 
 from abc import ABC, abstractmethod
 
@@ -23,7 +23,7 @@ def apply_correction(img, coeffs, x1=0.0, x2=1.0):
 
 class Calibration(Serializable, ABC):
     def __init__(self):
-        self.logger = logging.getLogger("sfdi")
+        self.logger = logging.getLogger("opensfdi")
         
     @abstractmethod
     def calibrate(self):

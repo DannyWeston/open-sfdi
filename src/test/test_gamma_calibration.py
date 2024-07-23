@@ -1,23 +1,10 @@
 import unittest
 
-
 import numpy as np
-import os
-
-import cv2
-
-
-from numpy.polynomial import Polynomial
 
 from numpy.polynomial.polynomial import polyval
 
-
-from sfdi.fringes import FringeGenerator
-
-from sfdi.calibration.gamma_calibration import GammaCalibration
-
-
-from sfdi.definitions import CALIBRATION_DIR
+from opensfdi.calibration import GammaCalibration
 
 
 class TestGammaCalibration(unittest.TestCase):
