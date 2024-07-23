@@ -3,7 +3,7 @@ src/sfdi/data/*
 
 poetry.lock
 
-**/.vscode
+.vscode
 
 .venv/2
 **/__pycache__
