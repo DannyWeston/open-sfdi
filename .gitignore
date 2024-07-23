@@ -1,6 +1,8 @@
 # Custom paths to not include
 src/sfdi/data/*
 
+**/.vscode
+
 .venv/2
 **/__pycache__
 
