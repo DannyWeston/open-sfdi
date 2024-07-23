@@ -1,10 +1,6 @@
 import cv2
 import logging
 import numpy as np
-import os
-import json
-
-import pickle
 
 import matplotlib.pyplot as plt
 
