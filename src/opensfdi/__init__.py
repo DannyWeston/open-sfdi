@@ -71,6 +71,41 @@ def rgb2grey(img):
 def unwrapped_phase(phi_imgs):
     return unwrap_phase(phi_imgs)
 
+
+
+def unwrap_itoh_1d(wrapped):
+    k = 0
+
+    addon = np.zeros(wrapped.shape)
+
+    for i in range(0, len(wrapped) - 1):
+        difference = wrapped[i + 1] - wrapped[i]
+        if np.pi < difference:
+            k -= (2.0 * np.pi)
+
+        elif difference < -np.pi:
+            k += (2.0 * np.pi)
+
+        addon[i] = k
+
+    return wrapped + addon
+
+def unwrap_itoh_2d(wrapped):
+    # TODO: Maybe possible to do this in place?
+
+    a, b, c = wrapped.shape
+
+    unwrapped = np.zeros((a, b, c))
+    for i in range(0, a):
+        unwrapped[i, :] = unwrap_itoh_1d(wrapped[i, :])
+
+    for j in range(0, b):
+        unwrapped[:, j] = unwrap_itoh_1d(wrapped[:, j])
+
+    return unwrapped
+
+
+
 def wrapped_phase(imgs):
     p = np.zeros(imgs[0].shape, dtype=np.float32)
     q = np.zeros(imgs[0].shape, dtype=np.float32)
