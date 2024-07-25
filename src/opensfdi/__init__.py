@@ -93,9 +93,9 @@ def unwrap_itoh_1d(wrapped):
 def unwrap_itoh_2d(wrapped):
     # TODO: Maybe possible to do this in place?
 
-    a, b, c = wrapped.shape
+    a, b = wrapped.shape
 
-    unwrapped = np.zeros((a, b, c))
+    unwrapped = np.zeros((a, b))
     for i in range(0, a):
         unwrapped[i, :] = unwrap_itoh_1d(wrapped[i, :])
 
@@ -104,6 +104,10 @@ def unwrap_itoh_2d(wrapped):
 
     return unwrapped
 
+def unwrap_reliability_2d(wrapped):
+    
+    
+    return None
 
 
 def wrapped_phase(imgs):
