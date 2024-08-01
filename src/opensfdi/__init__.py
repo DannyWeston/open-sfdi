@@ -29,6 +29,11 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.DEBUG if DEBUG else logging.INFO)
 
+def show_phasemap(phasemap, min_phase=None, max_phase=None):
+    plt.imshow(phasemap, cmap='gray', vmin=min_phase, vmax=max_phase)
+    plt.title(f'Phasemap ({phasemap.min():.2f} to {phasemap.max():.2f})')
+    plt.show()
+
 def show_surface(data):
     hf = plt.figure()
 
@@ -40,7 +45,7 @@ def show_surface(data):
 
     plt.show()
 
-def display_image(img, grey=False, title='', vmin=0.0, vmax=1.0):
+def show_image(img, grey=False, title='', vmin=0.0, vmax=1.0):
     if grey:
         cmap='gray'
     else:
@@ -70,44 +75,6 @@ def rgb2grey(img):
 
 def unwrapped_phase(phi_imgs):
     return unwrap_phase(phi_imgs)
-
-
-
-def unwrap_itoh_1d(wrapped):
-    k = 0
-
-    addon = np.zeros(wrapped.shape)
-
-    for i in range(0, len(wrapped) - 1):
-        difference = wrapped[i + 1] - wrapped[i]
-        if np.pi < difference:
-            k -= (2.0 * np.pi)
-
-        elif difference < -np.pi:
-            k += (2.0 * np.pi)
-
-        addon[i] = k
-
-    return wrapped + addon
-
-def unwrap_itoh_2d(wrapped):
-    # TODO: Maybe possible to do this in place?
-
-    a, b = wrapped.shape
-
-    unwrapped = np.zeros((a, b))
-    for i in range(0, a):
-        unwrapped[i, :] = unwrap_itoh_1d(wrapped[i, :])
-
-    for j in range(0, b):
-        unwrapped[:, j] = unwrap_itoh_1d(wrapped[:, j])
-
-    return unwrapped
-
-def unwrap_reliability_2d(wrapped):
-    
-    
-    return None
 
 
 def wrapped_phase(imgs):

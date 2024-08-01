@@ -25,14 +25,14 @@ class FringeFactory:
 
     @staticmethod
     def MakeSinusoidal(frequency, phase_count, orientation, width=1024, height=1024):
-        imgs = np.empty((phase_count, width, height))
+        imgs = np.empty((phase_count, width, height), dtype=np.float32)
         
         for i in range(phase_count):
-            x, y = np.meshgrid(np.arange(width, dtype=int), np.arange(height, dtype=int))
+            x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
 
             gradient = np.sin(orientation) * x - np.cos(orientation) * y
 
-            imgs[i] = np.sin(((2.0 * np.pi * gradient) / frequency) + phase_count)
+            imgs[i] = np.sin(((2.0 * np.pi * gradient) / frequency) + i)
             
             imgs[i] = cv2.normalize(imgs[i], None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
         
@@ -46,11 +46,10 @@ class FringeFactory:
 
     @staticmethod
     def GrayToRGB(imgs):
-        count, width, height = imgs.shape
+        a, b, c = imgs.shape
+        rgb_imgs = np.empty(shape=(a, b, c, 3), dtype=imgs[0].dtype)
         
-        rgb_imgs = np.empty((count, width, height, 3))
-        
-        for i in range(count):
-           rgb_imgs[i] = cv2.cvtColor(imgs[i], cv2.COLOR_GRAY2RGB)
-           
+        for i, img in enumerate(imgs):
+            rgb_imgs[i] = cv2.merge((img, img, img))
+
         return rgb_imgs

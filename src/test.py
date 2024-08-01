@@ -1,24 +1,32 @@
 import numpy as np
+
 from matplotlib import pyplot as plt
 from skimage import data, img_as_float, color, exposure
-from skimage.restoration import unwrap_phase
 
-from opensfdi import unwrap_itoh_2d
+from opensfdi import show_phasemap
+from opensfdi.unwrap import itoh, reliability
+from opensfdi.fringes import FringeFactory
+
+import matplotlib.pyplot as plt
+
+image = FringeFactory.MakeSinusoidal(8, 3, -np.pi / 2, width=16, height=16)[0]
 
 # Load an image as a floating-point grayscale
-image = color.rgb2gray(img_as_float(data.chelsea()))
-# Scale the image to [0, 4*pi]
+#image = color.rgb2gray(img_as_float(data.chelsea()))
+
 image = exposure.rescale_intensity(image, out_range=(0, 4 * np.pi))
+
 # Create a phase-wrapped image in the interval [-pi, pi)
 image_wrapped = np.angle(np.exp(1j * image))
 
+show_phasemap(image_wrapped)
+
 # Perform phase unwrapping
-image_unwrapped = unwrap_itoh_2d(image_wrapped)
+image_unwrapped = itoh.unwrap_phase(image_wrapped)
+#show_phasemap(image_unwrapped)
 
-print(image_unwrapped.min(), image_unwrapped.max())
-
-image_unwrapped_2 = unwrap_phase(image_wrapped)
-
+image_unwrapped_2 = reliability.unwrap_phase(image_wrapped)
+show_phasemap(image_unwrapped_2)
 
 fig, ax = plt.subplots(2, 2, sharex=True, sharey=True)
 ax1, ax2, ax3, ax4 = ax.ravel()

@@ -25,127 +25,172 @@ import numpy as np
 #     Muhammad F. Kasim, University of Oxford (2017)
 #     Email: firman.kasim@gmail.com
 
-def unwrap_phase(wrapped):
+def unwrap_phase(wrapped, relationship=None):
+    if not relationship:
+        relationship = lambda x: 1 / x
 
-    [Ny, Nx] = size(img)
-
-    # get the reliability
-    reliability = get_reliability(img)
-
-    # get the edges
-    [h_edges, v_edges] = get_edges(reliability)
-
-    # combine all edges and sort it
-    edges = [h_edges(:); v_edges(:)]
-    edge_bound_idx = Ny * Nx; # if i <= edge_bound_idx, it is h_edges
-
-    [~, edge_sort_idx] = sort(edges, 'descend')
-
-    # get the indices of pixels adjacent to the edges
-    idxs1 = mod(edge_sort_idx - 1, edge_bound_idx) + 1
-    idxs2 = idxs1 + 1 + (Ny - 1) .* (edge_sort_idx <= edge_bound_idx)
-
-    # label the group
-    group = reshape([1:numel(img)], Ny*Nx, 1)
-    is_grouped = zeros(Ny*Nx,1)
-    group_members = cell(Ny*Nx,1)
-
-    for i = 1:size(is_grouped,1)
-        group_members{i} = i
+    if wrapped.ndim == 2:
+        return __unwrap_phase_2d(wrapped, relationship)
     
-    num_members_group = ones(Ny*Nx,1);
+    raise Exception("Only 2D phase unwrapping is supported by this algorithm!")
 
-    # propagate the unwrapping
-    res_img = img;
-    num_nan = sum(isnan(edges)); # count how many nan-s and skip them
+def __unwrap_phase_2d(wrapped, relationship):
+    w_x, w_y = wrapped.shape
 
-    for i = num_nan+1 : length(edge_sort_idx)
-        # get the indices of the adjacent pixels
-        idx1 = idxs1(i);
-        idx2 = idxs2(i);
+    # Get the reliability
+    reliability = __get_reliability_2d(wrapped, relationship)
+
+    print()
+    print(reliability)
+
+    # Get the edges
+    vert_edges, hori_edges = __get_edges_2d(reliability)
+
+    print()
+    print(vert_edges)
+
+    print()
+    print(hori_edges)
+
+    return reliability
+
+    # # Combine all edges and sort it
+    # edges = [hori_edges, vert_edges]
+    # edges_size = w_x * w_y
+
+    # # Sort into descending order
+    # edges_sort = edges[::-1].sort()
+
+    # # get the indices of pixels adjacent to the edges
+    # idxs1 = np.mod(edge_sort_idx - 1, edge_bound_idx)
+
+    # group = np.reshape(Ny * Nx, 1)
+
+    # p = [1 : numel[wrapped]]
+
+    # idxs2 = idxs1 + 1 + (Ny - 1) * (edge_sort_idx <= edge_bound_idx)
+
     
-        # skip if they belong to the same group
-        if (group(idx1) == group(idx2)):
-            continue
+
+    # # label the group
+    # is_grouped = np.zeros(Ny*Nx,1)
+    # group_members = [Ny*Nx,1]
+
+    # for i in range(len(is_grouped)):
+    #     group_members[i] = i
     
-        # idx1 should be ungrouped (swap if idx2 ungrouped and idx1 grouped)
-        # otherwise, activate the flag all_grouped.
-        # The group in idx1 must be smaller than in idx2. If initially
-        # group(idx1) is larger than group(idx2), then swap it.
+    # num_members_group = np.ones(Ny * Nx, 1)
+
+    # # propagate the unwrapping
+    # res_img = wrapped
+    # num_nan = sum(np.isnan(edges))
+
+    # for i in range(num_nan+1, len(edge_sort_idx)):
+    #     # get the indices of the adjacent pixels
+    #     idx1 = idxs1(i)
+    #     idx2 = idxs2(i)
     
-        all_grouped = 0
-        if is_grouped(idx1):
-            if !is_grouped(idx2):
-                idxt = idx1
-                idx1 = idx2
-                idx2 = idxt
-            elif num_members_group(group(idx1)) > num_members_group(group(idx2)):
-                idxt = idx1
-                idx1 = idx2
-                idx2 = idxt
-                all_grouped = 1
-            else
-                all_grouped = 1
+    #     # skip if they belong to the same group
+    #     if (group(idx1) == group(idx2)):
+    #         continue
+    
+    #     # idx1 should be ungrouped (swap if idx2 ungrouped and idx1 grouped)
+    #     # otherwise, activate the flag all_grouped.
+    #     # The group in idx1 must be smaller than in idx2. If initially
+    #     # group(idx1) is larger than group(idx2), then swap it.
+    
+    #     all_grouped = 0
+    #     if is_grouped(idx1):
+    #         if not is_grouped(idx2):
+    #             idxt = idx1
+    #             idx1 = idx2
+    #             idx2 = idxt
+    #         elif num_members_group(group(idx1)) > num_members_group(group(idx2)):
+    #             idxt = idx1
+    #             idx1 = idx2
+    #             idx2 = idxt
+    #             all_grouped = 1
+    #         else:
+    #             all_grouped = 1
             
-        # calculate how much we should add to the idx1 and group
-        dval = floor((res_img(idx2) - res_img(idx1) + pi) / (2*pi)) * 2*pi
+    #     # calculate how much we should add to the idx1 and group
+    #     dval = floor((res_img(idx2) - res_img(idx1) + np.pi) / (2.0 * np.pi)) * 2 * np.pi
     
-        # which pixel should be changed
-        g1 = group(idx1);
-        g2 = group(idx2);
+    #     # which pixel should be changed
+    #     g1 = group(idx1)
+    #     g2 = group(idx2)
     
-        if all_grouped: pix_idxs = group_members{g1}
-        else: pix_idxs = idx1
-    
-        # add the pixel value
-        if dval ~= 0: res_img(pix_idxs) = res_img(pix_idxs) + dval
-    
-        # change the group
-        len_g1 = num_members_group(g1)
-        len_g2 = num_members_group(g2)
-        group_members{g2}(len_g2 + 1 : len_g2 + len_g1) = pix_idxs
-        group(pix_idxs) = g2 # assign the pixels to the new group
-        num_members_group(g2) = num_members_group(g2) + len_g1
-    
-        # mark idx1 and idx2 as already being grouped
-        is_grouped(idx1) = 1
-        is_grouped(idx2) = 1
-    
-def get_reliability(img):
-    rel = np.zeros(img.size)
+    #     if all_grouped: 
+    #         pix_idxs = group_members{g1}
 
-    # get the shifted images (N-2, N-2)
-    img_im1_jm1 = img[0 : -2  , 0 : -2]
-    img_i_jm1   = img[1 : -1  , 0 : -2]
-    img_ip1_jm1 = img[2 :     , 0 : -2]
-    img_im1_j   = img[0 : -2  , 1 : -1]
-    img_i_j     = img[1 : -1  , 1 : -1]
-    img_ip1_j   = img[2 :     , 1 : -1]
-    img_im1_jp1 = img[0 : -2  , 2 :   ]
-    img_i_jp1   = img[1 : -1  , 2 :   ]
-    img_ip1_jp1 = img[2 :     , 2 :   ]
+    #     else: 
+    #         pix_idxs = idx1
+    
+    #     # add the pixel value
+    #     if dval != 0: 
+    #         res_img[pix_idxs] = res_img[pix_idxs] + dval
+    
+    #     # change the group
+    #     len_g1 = num_members_group(g1)
+    #     len_g2 = num_members_group(g2)
+    #     group_members[g2][len_g2 + 1 : len_g2 + len_g1] = pix_idxs
+    #     group[pix_idxs] = g2 # assign the pixels to the new group
+    #     num_members_group[g2] = num_members_group(g2) + len_g1
+    
+    #     # mark idx1 and idx2 as already being grouped
+    #     is_grouped[idx1] = 1
+    #     is_grouped[idx2] = 1
 
-    # calculate the difference
-    gamma = lambda x: np.sign(x) * np.mod(abs(x), np.pi)
-    H  = gamma(img_im1_j   - img_i_j) - gamma(img_i_j - img_ip1_j  )
-    V  = gamma(img_i_jm1   - img_i_j) - gamma(img_i_j - img_i_jp1  )
-    D1 = gamma(img_im1_jm1 - img_i_j) - gamma(img_i_j - img_ip1_jp1)
-    D2 = gamma(img_im1_jp1 - img_i_j) - gamma(img_i_j - img_ip1_jm1)
+def __get_reliability_2d(img, relationship):
 
-    # calculate the second derivative
-    D = math.sqrt(H.*H + V.*V + D1.*D1 + D2.*D2);
+    # Diagonals
+    img_in1_jn1 = img[:-2, 2:]      # i = -1, j = -1
+    img_in1_jp1 = img[:-2, :-2]     # i = -1, j = +1
+    img_ip1_jp1 = img[2:, :-2]      # i = +1, j = +1
+    img_ip1_jn1 = img[2:, 2:]       # i = +1, j = -1
 
-    # assign the reliability as 1 / D
-    rel(2:end-1, 2:end-1) = 1./D;
+    # Orthogonal
+    img_i_jp1   = img[1:-1, :-2]    # i = 0, j = +1 
+    img_i_jn1   = img[1:-1, 2:]     # i = 0, j = -1
+    img_ip1_j   = img[2:, 1:-1]     # i = +1, j = 0
+    img_in1_j   = img[:-2, 1:-1]    # i = -1, j = 0
 
-    # assign all nan's in rel with non-nan in img to 0
-    # also assign the nan's in img to nan
-    rel(isnan(rel) & ~isnan(img)) = 0
-    rel(isnan(img)) = nan
+    # Central
+    img_i_j     = img[1:-1, 1:-1]   # i = 0, j = 0
+
+    # Determine positive or negative modulus pi
+    gamma_mod = lambda x: np.sign(x) * np.mod(np.abs(x), np.pi)
+
+    # H = gamma( Phi_I(-1, 0) - Phi_I(0, 0) ) - gamma( Phi_I(0, 0) - Phi_I(1, 0) )
+    H  = gamma_mod(img_in1_j - img_i_j) - gamma_mod(img_i_j - img_ip1_j)
+
+    # V = gamma( Phi_I(0, -1) - Phi_I(0, 0) ) - gamma( Phi_I(0, 0) - Phi_I(0, 1) )
+    V  = gamma_mod(img_i_jn1   - img_i_j) - gamma_mod(img_i_j - img_i_jp1)
+
+    # D1 = gamma( Phi_I(-1, -1) - Phi_I(0, 0) ) - gamma( Phi_I(0, 0) - Phi_I(1, 1) )
+    D1 = gamma_mod(img_in1_jn1 - img_i_j) - gamma_mod(img_i_j - img_ip1_jp1)
+
+    # D2 = gamma( Phi_I(-1, +1) - Phi_I(0, 0) ) - gamma( Phi_I(0, 0) - Phi_I(1, -1) )
+    D2 = gamma_mod(img_in1_jp1 - img_i_j) - gamma_mod(img_i_j - img_ip1_jn1)
+
+    # D = sqrt(H^2 + V^2 + D1^2 D2^2)
+    D = np.sqrt(H * H + V * V + D1 * D1 + D2 * D2)
+
+    rel = np.empty_like(img)
+    rel[:] = np.nan # Fill with NaNs for now
+
+    # Set all non-border pixels to their relability score
+    rel[1:-1, 1:-1] = relationship(D)
+
+    # Any NaNs in the non-border pixels reduce to 0 (really small phase change)
+    # TODO: Maybe consider putting this in the relationship function?
+    rel[1:-1, 1:-1][np.isnan(rel[1:-1, 1:-1])] = 0 # No phase change?
 
     return rel
 
-function [h_edges, v_edges] = get_edges(rel)
-    [Ny, Nx] = size(rel);
-    h_edges = [rel(1:end, 2:end) + rel(1:end, 1:end-1), nan(Ny, 1)];
-    v_edges = [rel(2:end, 1:end) + rel(1:end-1, 1:end); nan(1, Nx)];
+def __get_edges_2d(rel):
+    x, y = rel.shape
+    vert = [rel[:, :-1] + rel[:, 1:], np.full((1, x), np.nan)]
+    hori = [rel[:-1, :] + rel[1:, :], np.full((y, 1), np.nan)]
+
+    return vert, hori
