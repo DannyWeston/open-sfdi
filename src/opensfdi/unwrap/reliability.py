@@ -1,5 +1,7 @@
 import numpy as np
 
+from itertools import zip_longest
+
 # Fast unwrapping 2D phase image using the algorithm given in:
 #     M. A. Herráez, D. R. Burton, M. J. Lalor, and M. A. Gdeisat,
 #     "Fast two-dimensional phase-unwrapping algorithm based on sorting by
@@ -27,12 +29,16 @@ import numpy as np
 
 def unwrap_phase(wrapped, relationship=None):
     if not relationship:
-        relationship = lambda x: 1 / x
+        relationship = __default_rel
 
     if wrapped.ndim == 2:
         return __unwrap_phase_2d(wrapped, relationship)
     
     raise Exception("Only 2D phase unwrapping is supported by this algorithm!")
+
+def __default_rel(x):
+    with np.errstate(divide='ignore'):
+        return 1.0 / x
 
 def __unwrap_phase_2d(wrapped, relationship):
     w_x, w_y = wrapped.shape
@@ -40,50 +46,46 @@ def __unwrap_phase_2d(wrapped, relationship):
     # Get the reliability
     reliability = __get_reliability_2d(wrapped, relationship)
 
-    print()
-    print(reliability)
-
     # Get the edges
-    vert_edges, hori_edges = __get_edges_2d(reliability)
+    hori, vert = __get_edges_2d(reliability)
 
-    print()
-    print(vert_edges)
+    # Combine all edges and sort
+    edges = np.append(hori, vert)
 
-    print()
-    print(hori_edges)
+    np.set_printoptions(precision=1)
 
-    return reliability
+    print(edges, end='\n\n')
 
-    # # Combine all edges and sort it
-    # edges = [hori_edges, vert_edges]
-    # edges_size = w_x * w_y
+    num_edges = w_x * w_y
 
-    # # Sort into descending order
-    # edges_sort = edges[::-1].sort()
+    # Sort by highest reliability - collect indices instead of values
+    sorted = np.flip(np.argsort(edges))
 
-    # # get the indices of pixels adjacent to the edges
-    # idxs1 = np.mod(edge_sort_idx - 1, edge_bound_idx)
+    print(sorted, end='\n\n')
 
-    # group = np.reshape(Ny * Nx, 1)
+    # Get the indices of pixels adjacent to the edges
+    neighbour1 = np.mod(sorted - 1, num_edges) + 1
+    neighbour2 = neighbour1 + 1 + (w_y - 1) * (sorted > num_edges)
 
-    # p = [1 : numel[wrapped]]
 
-    # idxs2 = idxs1 + 1 + (Ny - 1) * (edge_sort_idx <= edge_bound_idx)
+    # TODO: Fix function
 
+
+
+    groups = np.reshape(np.arange(0, wrapped.size, 1, dtype=int), num_edges)
+
+    # label the group
+    is_grouped = np.zeros_like(groups)
+    group_members = np.empty_like(groups)
+
+    for i in range(is_grouped.size):
+        group_members[i] = i
     
+    num_members_group = np.ones(edges_size)
 
-    # # label the group
-    # is_grouped = np.zeros(Ny*Nx,1)
-    # group_members = [Ny*Nx,1]
-
-    # for i in range(len(is_grouped)):
-    #     group_members[i] = i
-    
-    # num_members_group = np.ones(Ny * Nx, 1)
-
-    # # propagate the unwrapping
-    # res_img = wrapped
-    # num_nan = sum(np.isnan(edges))
+    # propagate the unwrapping
+    res_img = wrapped
+    num_nan = sum(np.isnan(edges))
 
     # for i in range(num_nan+1, len(edge_sort_idx)):
     #     # get the indices of the adjacent pixels
@@ -141,7 +143,7 @@ def __unwrap_phase_2d(wrapped, relationship):
     #     is_grouped[idx1] = 1
     #     is_grouped[idx2] = 1
 
-def __get_reliability_2d(img, relationship):
+def __get_reliability_2d(img, relationship=None):
 
     # Diagonals
     img_in1_jn1 = img[:-2, 2:]      # i = -1, j = -1
@@ -176,21 +178,43 @@ def __get_reliability_2d(img, relationship):
     # D = sqrt(H^2 + V^2 + D1^2 D2^2)
     D = np.sqrt(H * H + V * V + D1 * D1 + D2 * D2)
 
-    rel = np.empty_like(img)
-    rel[:] = np.nan # Fill with NaNs for now
-
-    # Set all non-border pixels to their relability score
+    # Calculate a reliability score for non-border pixels
+    rel = np.zeros_like(img)
     rel[1:-1, 1:-1] = relationship(D)
 
-    # Any NaNs in the non-border pixels reduce to 0 (really small phase change)
+    # Any NaNs in the non-border pixels reduce to 0
     # TODO: Maybe consider putting this in the relationship function?
-    rel[1:-1, 1:-1][np.isnan(rel[1:-1, 1:-1])] = 0 # No phase change?
+    rel[np.isnan(rel)] = 0  # Set to NaNs to be unreliable
 
     return rel
 
-def __get_edges_2d(rel):
-    x, y = rel.shape
-    vert = [rel[:, :-1] + rel[:, 1:], np.full((1, x), np.nan)]
-    hori = [rel[:-1, :] + rel[1:, :], np.full((y, 1), np.nan)]
+def __print_edges(hori, vert):
+    hori2 = hori.tolist()
+    vert2 = vert.tolist()
 
-    return vert, hori
+    rows = zip_longest(vert2, hori2, fillvalue=[])
+
+    for (v, h) in rows:
+        for x in v: print(f'\t{x:.2f}', end='\t')
+        print()
+
+        for x in h: print(f'{x:.2f}\t', end='\t')
+        print()
+
+def __get_edges_2d(rel):
+    # Image could be in a format such that width != height
+    # Therefore, need to pad edges with necessary nans so the
+    # the shape of vert matches hori
+    #
+    # This should be accounted for wherever the edges are used
+    x, y = rel.shape
+
+    # [rel(2:end, 1:end) + rel(1:end-1, 1:end); nan(1, Nx)];
+    hori = np.array(rel[:, 1:] + rel[:, :-1])
+    vert = np.array(rel[1:, :] + rel[:-1, :])
+
+    # These edges need to be padded before usage
+    hori = np.hstack((hori, np.full((x, 1), -1))).flatten()
+    vert = np.vstack((vert, np.full((1, y), -1))).flatten()
+
+    return hori, vert

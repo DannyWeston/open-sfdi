@@ -13,10 +13,10 @@ def __unwrap_phase_1d(wrapped):
     # Accumulate wraps of pi and store in k
     k = 0
 
-    addon = np.zeros(wrapped.shape)
+    addon = np.zeros_like(wrapped)
 
-    for i in range(0, len(wrapped) - 1):
-        difference = wrapped[i + 1] - wrapped[i]
+    for i in range(1, len(wrapped)):
+        difference = wrapped[i] - wrapped[i - 1]
         if np.pi < difference:
             k -= (2.0 * np.pi)
 
@@ -33,10 +33,11 @@ def __unwrap_phase_2d(wrapped):
     a, b = wrapped.shape
 
     unwrapped = np.zeros((a, b))
-    for i in range(0, a):
+    for j in range(b):
+        unwrapped[:, j] = __unwrap_phase_1d(wrapped[:, j])
+
+    for i in range(a):
         unwrapped[i, :] = __unwrap_phase_1d(wrapped[i, :])
 
-    for j in range(0, b):
-        unwrapped[:, j] = __unwrap_phase_1d(wrapped[:, j])
 
     return unwrapped

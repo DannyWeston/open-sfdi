@@ -25,7 +25,7 @@ class FringeFactory:
 
     @staticmethod
     def MakeSinusoidal(frequency, phase_count, orientation, width=1024, height=1024):
-        imgs = np.empty((phase_count, width, height), dtype=np.float32)
+        imgs = np.empty((phase_count, height, width), dtype=np.float32)
         
         for i in range(phase_count):
             x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
