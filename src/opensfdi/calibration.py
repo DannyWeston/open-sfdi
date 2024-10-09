@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from opensfdi import DEBUG
-from opensfdi import rgb2grey, display_image
+from opensfdi import rgb2grey, show_image
 from opensfdi.definitions import CALIBRATION_DIR
 from opensfdi.io.std import Serializable
 

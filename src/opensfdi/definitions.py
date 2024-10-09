@@ -39,5 +39,5 @@ def update_root(new_root, mkdirs=True):
     CALIBRATION_DIR = os.path.join(DATA_DIR, "calibration") # Location where calibration data is dumped
     
     if mkdirs: make_structure()
-    
+
 make_structure()

@@ -76,7 +76,6 @@ def rgb2grey(img):
 def unwrapped_phase(phi_imgs):
     return unwrap_phase(phi_imgs)
 
-
 def wrapped_phase(imgs):
     p = np.zeros(imgs[0].shape, dtype=np.float32)
     q = np.zeros(imgs[0].shape, dtype=np.float32)

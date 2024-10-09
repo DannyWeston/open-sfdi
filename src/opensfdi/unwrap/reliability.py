@@ -52,8 +52,6 @@ def __unwrap_phase_2d(wrapped, relationship):
     # Combine all edges and sort
     edges = np.append(hori, vert)
 
-    np.set_printoptions(precision=1)
-
     print(edges, end='\n\n')
 
     num_edges = w_x * w_y
@@ -64,84 +62,93 @@ def __unwrap_phase_2d(wrapped, relationship):
     print(sorted, end='\n\n')
 
     # Get the indices of pixels adjacent to the edges
-    neighbour1 = np.mod(sorted - 1, num_edges) + 1
-    neighbour2 = neighbour1 + 1 + (w_y - 1) * (sorted > num_edges)
+    neighbours1 = np.mod(sorted - 1, num_edges) + 1
+    neighbours2 = neighbours1 + 1 + (w_y - 1) * (sorted > num_edges)
 
-
-    # TODO: Fix function
-
-
-
-    groups = np.reshape(np.arange(0, wrapped.size, 1, dtype=int), num_edges)
+    adj_list = np.empty(wrapped.size, dtype=object)
+    adj_list = [[] for _ in adj_list]
 
     # label the group
-    is_grouped = np.zeros_like(groups)
-    group_members = np.empty_like(groups)
+    # is_grouped = np.zeros_like(groups)
+    # group_members = np.empty_like(groups)
 
-    for i in range(is_grouped.size):
-        group_members[i] = i
-    
-    num_members_group = np.ones(edges_size)
+    # for i in range(is_grouped.size):
+    #     group_members[i] = i
+
+    # num_members_group = np.ones(edges_size)
 
     # propagate the unwrapping
-    res_img = wrapped
-    num_nan = sum(np.isnan(edges))
+    num_nan = (edges == -1).sum()
 
-    # for i in range(num_nan+1, len(edge_sort_idx)):
-    #     # get the indices of the adjacent pixels
-    #     idx1 = idxs1(i)
-    #     idx2 = idxs2(i)
+    pixel_group = np.arange(0, w_x * w_y, 1, int)   
+    is_grouped = np.full(w_x * w_y, False, bool)
+    groups = np.empty(w_x * w_y, [], object)
     
-    #     # skip if they belong to the same group
-    #     if (group(idx1) == group(idx2)):
-    #         continue
-    
-    #     # idx1 should be ungrouped (swap if idx2 ungrouped and idx1 grouped)
-    #     # otherwise, activate the flag all_grouped.
-    #     # The group in idx1 must be smaller than in idx2. If initially
-    #     # group(idx1) is larger than group(idx2), then swap it.
-    
-    #     all_grouped = 0
-    #     if is_grouped(idx1):
-    #         if not is_grouped(idx2):
-    #             idxt = idx1
-    #             idx1 = idx2
-    #             idx2 = idxt
-    #         elif num_members_group(group(idx1)) > num_members_group(group(idx2)):
-    #             idxt = idx1
-    #             idx1 = idx2
-    #             idx2 = idxt
-    #             all_grouped = 1
-    #         else:
-    #             all_grouped = 1
-            
-    #     # calculate how much we should add to the idx1 and group
-    #     dval = floor((res_img(idx2) - res_img(idx1) + np.pi) / (2.0 * np.pi)) * 2 * np.pi
-    
-    #     # which pixel should be changed
-    #     g1 = group(idx1)
-    #     g2 = group(idx2)
-    
-    #     if all_grouped: 
-    #         pix_idxs = group_members{g1}
+    # for i = 1:size(is_grouped,1)
+    #     group_members{i} = i;
+    # end
+    # num_members_group = ones(Ny*Nx,1);
 
-    #     else: 
-    #         pix_idxs = idx1
-    
-    #     # add the pixel value
-    #     if dval != 0: 
-    #         res_img[pix_idxs] = res_img[pix_idxs] + dval
-    
-    #     # change the group
-    #     len_g1 = num_members_group(g1)
-    #     len_g2 = num_members_group(g2)
-    #     group_members[g2][len_g2 + 1 : len_g2 + len_g1] = pix_idxs
-    #     group[pix_idxs] = g2 # assign the pixels to the new group
-    #     num_members_group[g2] = num_members_group(g2) + len_g1
-    
-    #     # mark idx1 and idx2 as already being grouped
-    #     is_grouped[idx1] = 1
-    #     is_grouped[idx2] = 1
+    # % propagate the unwrapping
+    # res_img = img;
+    # num_nan = sum(isnan(edges)); % count how many nan-s and skip them
+    # for i = num_nan+1 : length(edge_sort_idx)
+    #     % get the indices of the adjacent pixels
+    #     idx1 = idxs1(i);
+    #     idx2 = idxs2(i);
+
+    #     % skip if they belong to the same group
+    #     if (group(idx1) == group(idx2)) continue; end
+
+    #     % idx1 should be ungrouped (swap if idx2 ungrouped and idx1 grouped)
+    #     % otherwise, activate the flag all_grouped.
+    #     % The group in idx1 must be smaller than in idx2. If initially
+    #     % group(idx1) is larger than group(idx2), then swap it.
+    #     all_grouped = 0;
+    #     if is_grouped(idx1)
+    #         if ~is_grouped(idx2)
+    #             idxt = idx1;
+    #             idx1 = idx2;
+    #             idx2 = idxt;
+    #         elseif num_members_group(group(idx1)) > num_members_group(group(idx2))
+    #             idxt = idx1;
+    #             idx1 = idx2;
+    #             idx2 = idxt;
+    #             all_grouped = 1;
+    #         else
+    #             all_grouped = 1;
+    #         end
+    #     end
+
+    #     % calculate how much we should add to the idx1 and group
+    #     dval = floor((res_img(idx2) - res_img(idx1) + pi) / (2*pi)) * 2*pi;
+
+    #     % which pixel should be changed
+    #     g1 = group(idx1);
+    #     g2 = group(idx2);
+    #     if all_grouped
+    #         pix_idxs = group_members{g1};
+    #     else
+    #         pix_idxs = idx1;
+    #     end
+
+    #     % add the pixel value
+    #     if dval ~= 0
+    #         res_img(pix_idxs) = res_img(pix_idxs) + dval;
+    #     end
+
+    #     % change the group
+    #     len_g1 = num_members_group(g1);
+    #     len_g2 = num_members_group(g2);
+    #     group_members{g2}(len_g2+1:len_g2+len_g1) = pix_idxs;
+    #     group(pix_idxs) = g2; % assign the pixels to the new group
+    #     num_members_group(g2) = num_members_group(g2) + len_g1;
+
+    #     % mark idx1 and idx2 as already being grouped
+    #     is_grouped(idx1) = 1;
+    #     is_grouped(idx2) = 1;
+    # end
+
 
 def __get_reliability_2d(img, relationship=None):
 

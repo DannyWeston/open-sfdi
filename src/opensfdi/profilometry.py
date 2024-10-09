@@ -4,7 +4,6 @@ from matplotlib import pyplot as plt
 from numpy.polynomial import polynomial as P
 
 from abc import ABC
-from stl import mesh
 
 from opensfdi import wrapped_phase, unwrapped_phase, centre_crop_img, rgb2grey
 
@@ -47,12 +46,12 @@ class PhaseHeight(ABC):
                 faces.append([v2, v4, v3])
 
         # Create the mesh object
-        mesh_data = mesh.Mesh(np.zeros(len(faces), dtype=mesh.Mesh.dtype))
-        for i, f in enumerate(faces):
-            for j in range(3):
-                mesh_data.vectors[i][j] = vertices[f[j]]
+        # mesh_data = mesh.Mesh(np.zeros(len(faces), dtype=mesh.Mesh.dtype))
+        # for i, f in enumerate(faces):
+        #     for j in range(3):
+        #         mesh_data.vectors[i][j] = vertices[f[j]]
 
-        mesh_data.save('heightmap_mesh.stl')
+        # mesh_data.save('heightmap_mesh.stl')
 
 class ClassicPhaseHeight(PhaseHeight):
     # ℎ = 𝜙𝐷𝐸 ⋅ 𝑝 ⋅ 𝑑 / 𝜙𝐷𝐸 ⋅ 𝑝 + 2𝜋𝑙
