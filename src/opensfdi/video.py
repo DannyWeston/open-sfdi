@@ -32,7 +32,7 @@ class ImageProjector(Projector):
 
 class FringeProjector(Projector):
     @abstractmethod
-    def __init__(self, name, frequency, orientation, resolution, phases=[]):
+    def __init__(self, name, frequency, orientation, resolution, phase):
         super().__init__(name)
         
         self.frequency = frequency
@@ -41,23 +41,11 @@ class FringeProjector(Projector):
         
         self.resolution = resolution
 
-        self.phases = phases
-        self.current = 0
+        self.phase = phase
 
     @abstractmethod
     def display(self):
         pass
-
-    def get_phase(self):
-        return 0.0 if len(self.phases) == 0 else self.phases[self.current]
-
-    def set_phases(self, phases, reset=False):
-        self.phases = phases
-
-        if reset: self.current = 0
-
-    def next(self):
-        self.current = (self.current + 1) % len(self.phases)
 
 class Camera(ABC):
     def __init__(self, resolution=(1280, 720), name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):
