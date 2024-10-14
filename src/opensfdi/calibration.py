@@ -23,7 +23,7 @@ def apply_correction(img, coeffs, x1=0.0, x2=1.0):
 
 class Calibration(Serializable, ABC):
     def __init__(self):
-        self.logger = logging.getLogger("opensfdi")
+        self.logger = logging.getLogger(__name__)
         
     @abstractmethod
     def calibrate(self):

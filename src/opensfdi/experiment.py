@@ -1,6 +1,6 @@
+from abc import ABC, abstractmethod
 
 import numpy as np
-
 import logging
 
 from time import sleep
@@ -8,14 +8,13 @@ from scipy.ndimage import gaussian_filter
 from scipy.interpolate import griddata
 
 from opensfdi.profilometry import ClassicPhaseHeight
-from opensfdi.video import FringeProjector
 from opensfdi.utils import maths
 
 class Photogrammetry:
     def __init__(self, cameras, delay):
         if len(cameras) < 2: raise Exception("You need at least 2 cameras to run an experiment") 
         
-        self.logger = logging.getLogger('opensfdi')
+        self.logger = logging.getLogger(__name__)
         self.cameras = cameras
         self.delay = delay
         
@@ -23,36 +22,19 @@ class Photogrammetry:
         if 0 < self.delay: sleep(self.delay)
         return [camera.capture() for camera in self.cameras]
 
-class FringeProjection:
-    def __init__(self, cameras, projector: FringeProjector, delay=0.0):
-        if projector is None: 
-            raise Exception("You need a projector to run an experiment")
-        
-        if len(cameras) == 0: 
-            raise Exception("You need at least 1 camera to run an experiment") 
-        
-        self.logger = logging.getLogger('opensfdi')
-        
-        self.cameras = cameras
-        self.projector = projector
-        self.delay = delay
-
-    def run(self):
-        self.projector.display()
-        if 0 < self.delay: sleep(self.delay)
-        return [camera.capture() for camera in self.cameras]
+def fringe_projection(camera, projector, delay=0.0):
+    if projector is None: 
+        raise Exception("You need a projector to run fringe projection")
     
-    def next(self):
-        self.projector.next()
+    if camera is None: 
+        raise Exception("You need a camera to run fringe projection")
+    
+    projector.display()
+    if 0 < delay: sleep(delay)
+    return camera.capture()
 
-""" 
-    def stream(self):
-        self.stream = True
-        
-        while self.stream:
-            yield self.run()
-            
-        self.logger.info('Finished streaming') """
+def equal_phases(count):
+    return [2.0 * np.pi * (i / count) for i in range(count)]
 
 class LightCalc:
     def __init__(self, mu_a, mu_sp, refr_index, sf = [0.0, 0.2], std_dev = 3):
@@ -160,16 +142,18 @@ class LightCalc:
 
         return absorption, scattering, absorption_std, scattering_std
 
-class Experiment:
-    def __init__(self, test):
-        self.logger = logging.getLogger("opensfdi")
-
-        self.test = test
+class Experiment(ABC):
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
         
         self.streaming = False
     
         self.save_results = False
     
+    @abstractmethod
+    def run(self):
+        self.logger.info(f'Taking a measurement')
+
     def stream(self):
         self.streaming = True
         
@@ -178,61 +162,47 @@ class Experiment:
             
         self.logger.info('Finished streaming')
 
-    # Subclass Experiment to declare your own default run behaviour
-    def run(self):
-        self.logger.info(f'Taking a measurement')
-        
-        result = self.test.run()
-        
-        return result
+class NStepFPExperiment(Experiment):
+    def __init__(self, cameras, projector, steps):
+        super().__init__()
 
-class FPExperiment(Experiment):
-    def __init__(self, test: FringeProjection):
-        super().__init__(test)
+        if projector is None: raise Exception("You need a projector to run fringe projection")
+    
+        if (cameras is None) or (len(cameras) == 0): raise Exception("You need a camera to run fringe projection")
+        
+        if steps < 3: raise Exception(f"You need at least 3 phases to run an N-step experiment ({steps} provided)")
+        
+        self.__projector = projector
+        self.__cameras = cameras
 
-    # Subclass Experiment to declare your own default run behaviour
-    def run(self):
-        self.logger.info(f'Taking a measurement')
-        
-        result = self.test.run()
-        
-        return result
-
-class NStepFPExperiment(FPExperiment):
-    def __init__(self, test: FringeProjection, steps=3):
-        super().__init__(test)
-        
         self._pre_cbs = []
         self._post_cbs = []
 
-        self.steps = steps
-
-        proj_phases = len(test.projector.phases)
-
-        if proj_phases < self.steps: 
-            raise Exception(f"You need {steps} phases to run a {steps}-step experiment ({proj_phases} provided)")
+        self.__steps = steps
 
     def run(self):
-        # Run the experiment n times for both reference and measurement images
-        
+        """ Run the experiment n times for both reference and measurement images """
+        phases = equal_phases(self.__steps)
+
         # Run pre-reference image callbacks
         for cb in self._pre_cbs: cb()
         
         ref_imgs = []
-        for _ in range(self.steps):
-            ref_imgs.append(self.test.run())
-            self.test.next()
+        for i in range(self.__steps):
+            self.__projector.phase = phases[i]
+            ref_imgs.append([fringe_projection(c, self.__projector) for c in self.__cameras])
             
         # Run post-ref callbacks
         for cb in self._post_cbs: cb()
         
         imgs = []
-        for _ in range(self.steps):
-            imgs.append(self.test.run())
-            self.test.next()
+        for _ in range(self.__steps):
+            self.__projector.phase = phases[i]
+            imgs.append([fringe_projection(c, self.__projector) for c in self.__cameras])
         
         self.logger.info(f'Measurement completed')
         
+        # Reorganise, not actually necessary
         ref_imgs = np.transpose(ref_imgs, (1, 0, 2, 3, 4))
         imgs = np.transpose(imgs, (1, 0, 2, 3, 4))
         

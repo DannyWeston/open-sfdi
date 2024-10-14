@@ -18,7 +18,7 @@ args = vars(args)
 
 DEBUG = args["debug"]
 
-logger = logging.getLogger('opensfdi')
+logger = logging.getLogger(__name__)
 
 #formatter = logging.Formatter(fmt='%(threadName)s:%(message)s')
 formatter = logging.Formatter(fmt='[%(levelname)s] %(message)s')
@@ -45,12 +45,12 @@ def show_surface(data):
 
     plt.show()
 
-def show_image(img, grey=False, title='', vmin=0.0, vmax=1.0):
+def show_image(img, grey=False, title='', vmin=0.0, vmax=1.0, norm=False):
     if grey:
         cmap='gray'
     else:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = cv2.normalize(img, None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
+        if norm: img = cv2.normalize(img, None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
         cmap='jet'
 
     plt.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)

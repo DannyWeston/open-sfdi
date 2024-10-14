@@ -9,7 +9,7 @@ from opensfdi.definitions import RESULTS_DIR, CALIBRATION_DIR
 
 class CalibrationService():
     def __init__(self, data_repo:CalibrationRepo = None):       
-        self._logger = logging.getLogger('opensfdi')
+        self._logger = logging.getLogger(__name__)
 
         self._data_repo = data_repo
 
@@ -41,7 +41,7 @@ class CalibrationService():
 
 class ResultService():
     def __init__(self, data_repo:BinRepo, image_repo:ImageRepo):
-        self._logger = logging.getLogger('opensfdi')
+        self._logger = logging.getLogger(__name__)
         
         self._data_repo = data_repo
         self._image_repo = image_repo
