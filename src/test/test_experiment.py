@@ -1,5 +1,8 @@
 import numpy as np
+import cv2
+from pathlib import Path
 
+from opensfdi.profilometry import ClassicPhaseHeight, show_heightmap
 from opensfdi.experiment import NStepFPExperiment
 from opensfdi.video import Camera, FringeProjector
 
@@ -72,6 +75,31 @@ class FakeFP(FringeProjector):
         pass
 
 def test_nstep():
+    # Load the images from disk
+
+    input_dir = Path('C:\\Users\\danie\\Desktop\\Results\\0.64mm-1')
+
+    input_dir = input_dir / 'noambient'
+
+    print(f"Loading images from {input_dir}")
+
+    steps = 8
+
+    ref_imgs = [cv2.imread(input_dir / f"ref_{i}.jpg") for i in range(steps)]
+    imgs = [cv2.imread(input_dir / f"measurement_{i}.jpg") for i in range(steps)]
+
+    print(f"{len(ref_imgs)} reference, {len(imgs)} measurement images loaded")
+
+    profil = ClassicPhaseHeight(0.64, 100.0, 10.0)
+    heightmap = profil.heightmap(ref_imgs, imgs, convert_grey=True)
+
+    print(heightmap.min(), heightmap.max())
+
+    show_heightmap(heightmap, f"{steps}-step reconstruction")
+
+    assert False
+
+def test_fringe_projection():
     p = FakeFP()
     c = FakeCamera()
 

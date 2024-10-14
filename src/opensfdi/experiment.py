@@ -144,23 +144,21 @@ class LightCalc:
 
 class Experiment(ABC):
     def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        
         self.streaming = False
     
         self.save_results = False
     
     @abstractmethod
     def run(self):
-        self.logger.info(f'Taking a measurement')
+        pass
 
     def stream(self):
         self.streaming = True
         
         while self.streaming:
             yield self.run()
-            
-        self.logger.info('Finished streaming')
+        
+        pass
 
 class NStepFPExperiment(Experiment):
     def __init__(self, cameras, projector, steps):
@@ -196,11 +194,11 @@ class NStepFPExperiment(Experiment):
         for cb in self._post_cbs: cb()
         
         imgs = []
-        for _ in range(self.__steps):
+        for i in range(self.__steps):
             self.__projector.phase = phases[i]
             imgs.append([fringe_projection(c, self.__projector) for c in self.__cameras])
         
-        self.logger.info(f'Measurement completed')
+        # TODO: Implement debug logger
         
         # Reorganise, not actually necessary
         ref_imgs = np.transpose(ref_imgs, (1, 0, 2, 3, 4))
@@ -213,11 +211,9 @@ class NStepFPExperiment(Experiment):
         
         if len(cam_plane_dists) != cameras:
             raise Exception("You must provide a distance for all cameras to the ref plane")
-            return None
         
         if len(cam_proj_dists) != cameras:
             raise Exception("You must provide a distance for all cameras to the projector")
-            return None
         
         heightmaps = []
         

@@ -59,7 +59,10 @@ class ClassicPhaseHeight(PhaseHeight):
     # d = distance between camera and reference plane
     # l = distance between camera and projector
         
-    def __init__(self, p, d, l):
+    def __init__(self, p: float, d: float, l: float):
+        """ p = Stripe width,
+            d = Distance between camera and reference plane,
+            l = distance between camera and projector """
         super().__init__()
         
         self.p = p

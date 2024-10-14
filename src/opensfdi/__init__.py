@@ -45,17 +45,9 @@ def show_surface(data):
 
     plt.show()
 
-def show_image(img, grey=False, title='', vmin=0.0, vmax=1.0, norm=False):
-    if grey:
-        cmap='gray'
-    else:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        if norm: img = cv2.normalize(img, None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
-        cmap='jet'
-
-    plt.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax)
-    plt.title(title)
-    plt.show()
+def show_image(img, title=''):
+    cv2.imshow(title, img)
+    cv2.waitKey(0)
 
 def centre_crop_img(img, x1, y1, x2:int = 0, y2:int = 0):
     if x2 == 0:
