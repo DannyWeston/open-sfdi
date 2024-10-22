@@ -37,8 +37,8 @@ class NStepPhaseShift(PhaseShift):
 
         N = len(imgs)
 
-        p = np.zeros_like(imgs[0])
-        q = np.zeros_like(imgs[0])
+        p = np.zeros(shape=imgs[0].shape, dtype=np.float64)
+        q = np.zeros(shape=imgs[0].shape, dtype=np.float64)
         
         # Accumulate phases
         for i, img in enumerate(imgs):

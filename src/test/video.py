@@ -43,6 +43,10 @@ class FakeFringeProjector(FringeProjector):
     @property
     def phase(self) -> float:
         return 0.0
+    
+    @phase.setter
+    def phase(self, value) -> float:
+        pass
 
     def display(self):
         """ Does nothing """

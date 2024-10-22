@@ -26,7 +26,7 @@ class Experiment(ABC):
             yield self.run()
 
 class FPExperiment(Experiment):
-    def __init__(self, camera: Camera, projector: FringeProjector, ph_shift: PhaseShift, ph_wrap: PhaseUnwrap, calib: PhaseHeight, capture_delay: 0.0):
+    def __init__(self, camera: Camera, projector: FringeProjector, ph_shift: PhaseShift, ph_wrap: PhaseUnwrap, calib: PhaseHeight, capture_delay = 0.0):
         self.__camera = camera
         self.__projector = projector
 
@@ -59,9 +59,10 @@ class FPExperiment(Experiment):
         """ Run the experiment to gather the needed images """
 
         # TODO: Implement debug logger
-
+        # TODO: Turn everything into numpy arrays
+        
         imgs = []
-        for _ in self.__calib.phasemaps_needed:
+        for _ in range(self.__calib.phasemaps_needed):
             # Gather a sequence of images
             imgs.append(self.__capture_sequence())
 

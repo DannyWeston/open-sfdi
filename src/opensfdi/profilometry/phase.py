@@ -5,8 +5,8 @@ from numpy.polynomial import polynomial as P
 
 class PhaseHeight(ABC):
     @abstractmethod
-    def __init__(self, calib):
-        self.__calib = calib
+    def __init__(self, calib=None):
+        self._calib = calib
 
         self.__phasemaps_needed = 2
 
@@ -18,7 +18,7 @@ class PhaseHeight(ABC):
         
     @abstractmethod
     def heightmap(self, phasemaps, *args, **kwargs):
-        if self.__calib is None:
+        if self._calib is None:
             raise Exception("You need to run/load calibration data first")
         
         if phasemaps is None: raise TypeError
@@ -36,24 +36,22 @@ class PhaseHeight(ABC):
         self.__post_cbs.append(cb)
 
     def call_post_cbs(self):
-        for cb in self.__post_cbs:
-            cb()
+        for cb in self.__post_cbs: cb()
 
     def save_data(self, path):
-        if self.__calib is None:
+        if self._calib is None:
             raise Exception("You need to run/load calibration data first")
 
         with open(path, "wb") as out_file:
-            np.save(out_file, self.__calib)
+            np.save(out_file, self._calib)
 
 class PolynomialPH(PhaseHeight):
-    def __init__(self, calib):
+    def __init__(self, calib=None):
         super().__init__(calib)
 
-        if self.__calib:
-            h, w, cs = self.__calib.shape
+        if not (self._calib is None):
+            h, w, cs = self._calib.shape
             self.__degree = cs
-            print(h, w, cs)
 
     @property
     def degree(self):
@@ -90,11 +88,11 @@ class PolynomialPH(PhaseHeight):
         ph_maps[1:] = phasemaps[1:] - ref_phase
 
         # Polynomial fit on a pixel-by-pixel basis to its height value
-        self.__calib = np.empty(shape=(degree + 1, h, w), dtype=np.float64)
+        self._calib = np.empty(shape=(degree + 1, h, w), dtype=np.float64)
 
         for y in range(h):
             for x in range(w):
-                self.__calib[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=degree)
+                self._calib[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=degree)
 
     def heightmap(self, phasemaps):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
@@ -111,7 +109,7 @@ class PolynomialPH(PhaseHeight):
 
         for y in range(h):
             for x in range(w):
-                heightmap[y, x] = P.polyval(phase_diff[y, x], self.__calib[:, y, x])
+                heightmap[y, x] = P.polyval(phase_diff[y, x], self._calib[:, y, x])
 
         return heightmap
 

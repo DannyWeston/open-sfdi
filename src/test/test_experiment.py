@@ -14,7 +14,7 @@ from opensfdi.profilometry import show_surface, show_heightmap
 
 def test_experiment():
     # Declare paths for loading stuff
-    input_dir = Path('C:\\Users\\danie\\Desktop\\Results\\Test1')
+    input_dir = Path('C:\\Users\\psydw2\\Desktop\\Results\\')
 
     calib_dir = input_dir / "Calibration"
 
@@ -28,15 +28,15 @@ def test_experiment():
         poly_ph = PolynomialPH(coeffs)
 
     else:
-        count = 20
-        phases = 4
-        heights = np.linspace(0.0, 20.0, count, dtype=np.float64)
+        count = 7
+        phases = 12
+        heights = np.linspace(0.0, 24.0, count, dtype=np.float64)
         imgs = []
 
         for i in range(count):
             group = []
             for j in range(phases):
-                img = cv2.imread(calib_dir / f"{i+1}_phase{j}.jpg", cv2.IMREAD_GRAYSCALE)
+                img = cv2.imread(calib_dir / f"height{i}_phase{j+1}.jpg", cv2.IMREAD_GRAYSCALE)
                 group.append(img)
 
             imgs.append(np.array(group))
@@ -49,10 +49,11 @@ def test_experiment():
         ph_shift = NStepPhaseShift(steps=phases)
         ph_unwrap = ReliabilityPhaseUnwrap()
 
-        phasemaps = []
-        for height_imgs in imgs:
-            shifted = ph_shift.shift(height_imgs)
-            phasemaps.append(ph_unwrap.unwrap(shifted))
+        z, _, h, w = imgs.shape
+        phasemaps = np.empty(shape=(z, h, w))
+
+        for i, height_imgs in enumerate(imgs):
+            phasemaps[i] = ph_unwrap.unwrap(ph_shift.shift(height_imgs))
 
         # Perform calibration
         poly_ph = PolynomialPH()
@@ -68,14 +69,7 @@ def test_experiment():
     meas_dir = input_dir / "Measurement"
     phases = 12
 
-    imgs = []
-    temp = []
-
-    temp = [cv2.imread(meas_dir / f"ref_{i}.jpg", cv2.IMREAD_GRAYSCALE) for i in range(phases)]
-    imgs.append(temp)
-
-    temp = [cv2.imread(meas_dir / f"measurement_{i}.jpg", cv2.IMREAD_GRAYSCALE) for i in range(phases)]
-    imgs.append(temp)
+    imgs = [cv2.imread(meas_dir / f"img{i}.jpg", cv2.IMREAD_GRAYSCALE) for i in range(phases * 2)]
 
     print("Finished loading measurement images")
 
@@ -84,11 +78,11 @@ def test_experiment():
     camera = FakeCamera(imgs)
     projector = FakeFringeProjector()
 
-    ph_shift = NStepPhaseShift()
+    ph_shift = NStepPhaseShift(phases)
     ph_unwrap = ReliabilityPhaseUnwrap()
 
     experiment = FPExperiment(camera, projector, ph_shift, ph_unwrap, poly_ph)
     heightmap = experiment.run()
 
     # Show the result
-    show_surface(heightmap)
+    show_heightmap(heightmap)
