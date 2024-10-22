@@ -1,190 +1,94 @@
 import numpy as np
 import cv2
+import os
+
 from pathlib import Path
+from test.video import FakeCamera, FakeFringeProjector
 
-from opensfdi import wrapped_phase, unwrap_phase, show_surface
-from opensfdi.profilometry import poly_phase_height
-from opensfdi.experiment import NStepFPExperiment
-from opensfdi.video import Camera, FringeProjector
+from opensfdi.experiment import FPExperiment
+from opensfdi.phase_shifting import NStepPhaseShift
+from opensfdi.phase_unwrapping import ReliabilityPhaseUnwrap
 
-class FakeCamera(Camera):
-    def __init__(self):
-        super().__init__()
+from opensfdi.profilometry.phase import PolynomialPH
+from opensfdi.profilometry import show_surface, show_heightmap
 
-        self.__resolution: tuple[int, int] = (1080, 1920)
-
-    @property
-    def resolution(self):
-        """ (height, width) resolution of image captures (must be greater than zero) """
-        return self.__resolution
-    
-    @resolution.setter
-    def resolution(self, value):
-        if any(k < 0 for k in value): raise ValueError("Resolution dimensions must be greater than zero")
-        
-        self.__resolution = value
-
-    def capture(self):
-        return np.ones(shape=(*self.resolution, 3), dtype=np.float32)
-
-class FakeFP(FringeProjector):
-    def __init__(self):
-        super().__init__()
-
-        self.__resolution : tuple[int, int] = (768, 1024)
-        self.__frequency : float = 1
-        self.__rotation : float = 1
-        self.__phase : float = np.pi / 2.0
-
-    @property
-    def resolution(self):
-        """ (height, width) resolution of image captures (must be greater than zero) """
-        return self.__resolution
-    
-    @resolution.setter
-    def resolution(self, value):
-        if any(k < 0 for k in value): raise ValueError("Resolution dimensions must be greater than zero")
-        
-        self.__resolution = value
-
-    @property
-    def phase(self):
-        return self.__phase
-    
-    @phase.setter
-    def phase(self, value):
-        self.__phase = value
-
-    @property
-    def frequency(self):
-        return self.__frequency
-    
-    @frequency.setter
-    def frequency(self, value):
-        if value < 0: raise ValueError("Frequency must be greater than zero")
-        self.__frequency = value
-
-    @property
-    def rotation(self):
-        return self.__rotation
-    
-    @rotation.setter
-    def rotation(self, value):
-        self.__rotation = value
-
-    def display(self):
-        pass
-
-def test_nstep():
-    # Load the images from disk
+def test_experiment():
+    # Declare paths for loading stuff
     input_dir = Path('C:\\Users\\danie\\Desktop\\Results\\Test1')
 
-    # Load the calibration images
     calib_dir = input_dir / "Calibration"
 
-    calib_count = 41
-    calib_phases = 3
-    calib_images = []
-    calib_dists = np.linspace(0.0, 200.0, 41, dtype=np.float64)
+    calib_file = calib_dir / "calib.npy"
+    
 
-    for i in range(calib_count):
-        calib_images.append(np.array([cv2.imread(calib_dir / f"{i+1}_{j+1}.jpg") for j in range(calib_phases)]))
+    # Load coeffs if they already exist
 
-    calib_images = np.array(calib_images)[::2]
-    calib_dists = calib_dists[::2]
+    if os.path.exists(calib_file):
+        coeffs = np.load(calib_file)
+        poly_ph = PolynomialPH(coeffs)
 
-    poly_deg = 5
-    coeffs = poly_phase_height(calib_images, calib_dists, poly_deg)
-    print(coeffs.shape)
+    else:
+        count = 20
+        phases = 4
+        heights = np.linspace(0.0, 20.0, count, dtype=np.float64)
+        imgs = []
 
-    # Now have the coefficients for height, so can use for construction
+        for i in range(count):
+            group = []
+            for j in range(phases):
+                img = cv2.imread(calib_dir / f"{i+1}_phase{j}.jpg", cv2.IMREAD_GRAYSCALE)
+                group.append(img)
+
+            imgs.append(np.array(group))
+
+        imgs = np.array(imgs)
+
+        print("Starting polynomial calibration...")
+
+        # Get unwrapped phasemaps of loaded images
+        ph_shift = NStepPhaseShift(steps=phases)
+        ph_unwrap = ReliabilityPhaseUnwrap()
+
+        phasemaps = []
+        for height_imgs in imgs:
+            shifted = ph_shift.shift(height_imgs)
+            phasemaps.append(ph_unwrap.unwrap(shifted))
+
+        # Perform calibration
+        poly_ph = PolynomialPH()
+        poly_ph.calibrate(phasemaps, heights, 5) # 5th degree polynomial
+        
+        # Save the data
+        poly_ph.save_data(calib_file)
+        print(f"Finished calibration (saved to {calib_file})")
+
 
     # Load the measurement images
+
     meas_dir = input_dir / "Measurement"
-    meas_phases = 12
+    phases = 12
 
-    ref_imgs = []
-    meas_imgs = []
+    imgs = []
+    temp = []
 
-    for i in range(meas_phases):
-        ref_imgs.append(cv2.imread(meas_dir / f"ref_{i}.jpg"))
-        meas_imgs.append(cv2.imread(meas_dir / f"measurement_{i}.jpg"))
+    temp = [cv2.imread(meas_dir / f"ref_{i}.jpg", cv2.IMREAD_GRAYSCALE) for i in range(phases)]
+    imgs.append(temp)
 
-    # Calculate phasemap
-    ref_phase = unwrap_phase(wrapped_phase(ref_imgs))
-    measured_phase = unwrap_phase(wrapped_phase(meas_imgs))
-    phase_diff = measured_phase - ref_phase
+    temp = [cv2.imread(meas_dir / f"measurement_{i}.jpg", cv2.IMREAD_GRAYSCALE) for i in range(phases)]
+    imgs.append(temp)
 
-    height = coeffs[0]
-    for i in range(1, poly_deg):
-        height += np.power(phase_diff, i) * coeffs[i]
+    print("Finished loading measurement images")
 
-    show_surface(height)
+    # Calculate phasemap difference for measurement + reference images
 
-    assert False
+    camera = FakeCamera(imgs)
+    projector = FakeFringeProjector()
 
-def test_fringe_projection():
-    p = FakeFP()
-    c = FakeCamera()
+    ph_shift = NStepPhaseShift()
+    ph_unwrap = ReliabilityPhaseUnwrap()
 
-    expected_img = c.capture()
-    
-    for i in range(3, 10):
-        print(f"Testing {i}-step methodology")
+    experiment = FPExperiment(camera, projector, ph_shift, ph_unwrap, poly_ph)
+    heightmap = experiment.run()
 
-        ref_imgs, imgs = NStepFPExperiment([c], p, i).run()
-
-        for cam in ref_imgs: # Test actual images
-            for img in cam:
-                assert (img == expected_img).all()
-
-        for cam in imgs: # Test measurement images
-            for img in cam:
-                assert (img == expected_img).all()
-
-    assert True
-
-# image = FringeFactory.MakeSinusoidal(1, 3, -np.pi / 2, width=4, height=4)[0]
-# #image = color.rgb2gray(img_as_float(data.chelsea()))
-
-# vals = np.array([
-#     np.array([2.1, 0.5, 0.2, 0.1]),
-#     np.array([0.3, 1.0, 1.9, 0.3]),
-#     np.array([1.6, 0.9, 0.2, 0.3]),
-#     np.array([0.1, 0.4, 0.1, 2.0]),
-# ])
-
-# image = exposure.rescale_intensity(image, out_range=(0, 2 * np.pi))
-# #show_phasemap(image)
-
-# # Create a phase-wrapped image in the interval [-pi, pi)
-# image_wrapped = np.angle(np.exp(1j * image))
-# #show_phasemap(image_wrapped)
-
-# # Perform phase unwrapping
-# image_unwrapped = itoh.unwrap_phase(image_wrapped)
-# #show_phasemap(image_unwrapped)
-
-# image_unwrapped_2 = reliability.unwrap_phase(image_wrapped)
-# show_phasemap(image_unwrapped_2)
-
-# # Perform phase unwrapping
-# #image_unwrapped_3 = rest.unwrap_phase(image_wrapped)
-# #show_phasemap(image_unwrapped_3)
-
-# fig, ax = plt.subplots(2, 2, sharex=True, sharey=True)
-# ax1, ax2, ax3, ax4 = ax.ravel()
-
-# fig.colorbar(ax1.imshow(image, cmap='gray', vmin=0, vmax=4 * np.pi), ax=ax1)
-# ax1.set_title('Original')
-
-# fig.colorbar(ax2.imshow(image_wrapped, cmap='gray', vmin=-np.pi, vmax=np.pi), ax=ax2)
-# ax2.set_title('Wrapped phase')
-
-# fig.colorbar(ax3.imshow(image_unwrapped, cmap='gray'), ax=ax3)
-# ax3.set_title('Simple phase unwrapping')
-
-# fig.colorbar(ax4.imshow(image_unwrapped_2, cmap='gray'), ax=ax4)
-# ax4.set_title('Scikit phase unwrapping')
-
-# plt.show()
+    # Show the result
+    show_surface(heightmap)
