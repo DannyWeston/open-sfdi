@@ -2,7 +2,8 @@ import numpy as np
 import cv2
 from pathlib import Path
 
-from opensfdi.profilometry import ClassicPhaseHeight, show_heightmap
+from opensfdi import wrapped_phase, unwrap_phase, show_surface
+from opensfdi.profilometry import poly_phase_height
 from opensfdi.experiment import NStepFPExperiment
 from opensfdi.video import Camera, FringeProjector
 
@@ -76,26 +77,49 @@ class FakeFP(FringeProjector):
 
 def test_nstep():
     # Load the images from disk
+    input_dir = Path('C:\\Users\\danie\\Desktop\\Results\\Test1')
 
-    input_dir = Path('C:\\Users\\danie\\Desktop\\Results\\0.64mm-1')
+    # Load the calibration images
+    calib_dir = input_dir / "Calibration"
 
-    input_dir = input_dir / 'noambient'
+    calib_count = 41
+    calib_phases = 3
+    calib_images = []
+    calib_dists = np.linspace(0.0, 200.0, 41, dtype=np.float64)
 
-    print(f"Loading images from {input_dir}")
+    for i in range(calib_count):
+        calib_images.append(np.array([cv2.imread(calib_dir / f"{i+1}_{j+1}.jpg") for j in range(calib_phases)]))
 
-    steps = 8
+    calib_images = np.array(calib_images)[::2]
+    calib_dists = calib_dists[::2]
 
-    ref_imgs = [cv2.imread(input_dir / f"ref_{i}.jpg") for i in range(steps)]
-    imgs = [cv2.imread(input_dir / f"measurement_{i}.jpg") for i in range(steps)]
+    poly_deg = 5
+    coeffs = poly_phase_height(calib_images, calib_dists, poly_deg)
+    print(coeffs.shape)
 
-    print(f"{len(ref_imgs)} reference, {len(imgs)} measurement images loaded")
+    # Now have the coefficients for height, so can use for construction
 
-    profil = ClassicPhaseHeight(0.64, 100.0, 10.0)
-    heightmap = profil.heightmap(ref_imgs, imgs, convert_grey=True)
+    # Load the measurement images
+    meas_dir = input_dir / "Measurement"
+    meas_phases = 12
 
-    print(heightmap.min(), heightmap.max())
+    ref_imgs = []
+    meas_imgs = []
 
-    show_heightmap(heightmap, f"{steps}-step reconstruction")
+    for i in range(meas_phases):
+        ref_imgs.append(cv2.imread(meas_dir / f"ref_{i}.jpg"))
+        meas_imgs.append(cv2.imread(meas_dir / f"measurement_{i}.jpg"))
+
+    # Calculate phasemap
+    ref_phase = unwrap_phase(wrapped_phase(ref_imgs))
+    measured_phase = unwrap_phase(wrapped_phase(meas_imgs))
+    phase_diff = measured_phase - ref_phase
+
+    height = coeffs[0]
+    for i in range(1, poly_deg):
+        height += np.power(phase_diff, i) * coeffs[i]
+
+    show_surface(height)
 
     assert False
 

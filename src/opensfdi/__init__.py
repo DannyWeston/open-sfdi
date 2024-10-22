@@ -39,9 +39,9 @@ def show_surface(data):
 
     ha = hf.add_subplot(111, projection='3d')
 
-    X, Y = np.meshgrid(range(len(data[0])), range(len(data)))  # `plot_surface` expects `x` and `y` data to be 2D
-    temp = np.mean(data, axis=2) if data.ndim == 3 else data
-    ha.plot_surface(X, Y, temp)
+    X, Y = np.meshgrid(range(data.shape[1]), range(data.shape[0]))
+
+    ha.plot_surface(X, Y, data)
 
     plt.show()
 
@@ -65,19 +65,21 @@ def rgb2grey(img):
     r, g, b = img[:,:,0], img[:,:,1], img[:,:,2]
     return 0.2989 * r + 0.5870 * g + 0.1140 * b
 
-def unwrapped_phase(phi_imgs):
-    return unwrap_phase(phi_imgs)
-
 def wrapped_phase(imgs):
-    p = np.zeros(imgs[0].shape, dtype=np.float32)
-    q = np.zeros(imgs[0].shape, dtype=np.float32)
+    h, w = imgs[0].shape
+    N = len(imgs)
 
+    p = np.zeros(shape=(h, w), dtype=np.float64)
+    q = np.zeros(shape=(h, w), dtype=np.float64)
+
+    # Accumulate phases
     for i, img in enumerate(imgs):
-        phase = (2.0  * np.pi * i) / len(imgs)
-        p = np.add(p, img * np.sin(phase), dtype=np.float32)
-        q = np.add(q, img * np.cos(phase), dtype=np.float32)
+        phase = (2.0 * np.pi * i) / N
 
-    return np.negative(np.arctan2(p, q), dtype=np.float32)
+        p += img * np.sin(phase)
+        q += img * np.cos(phase)
+
+    return -np.arctan2(p, q)
 
 def ac_imgs(imgs: list):
     return np.divide(np.sum(imgs, axis=0), len(imgs))
