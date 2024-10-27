@@ -14,13 +14,12 @@ from opensfdi.profilometry import show_surface, show_heightmap
 
 def test_experiment():
     # Declare paths for loading stuff
-    input_dir = Path('C:\\Users\\psydw2\\Desktop\\Results\\')
+    input_dir = Path('C:\\Users\\psydw2\\OneDrive - The University of Nottingham\\university\\year1\\Data\\Blender\\Polynomial')
 
     calib_dir = input_dir / "Calibration"
 
     calib_file = calib_dir / "calib.npy"
     
-
     # Load coeffs if they already exist
 
     if os.path.exists(calib_file):
@@ -83,6 +82,10 @@ def test_experiment():
 
     experiment = FPExperiment(camera, projector, ph_shift, ph_unwrap, poly_ph)
     heightmap = experiment.run()
+
+    heightmap[heightmap > 240] = 240
+    heightmap[heightmap < 0] = 0
+    heightmap = -heightmap
 
     # Show the result
     show_heightmap(heightmap)

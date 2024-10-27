@@ -1,31 +1,35 @@
 import numpy as np
 
+from opensfdi.io.repositories import IRepository
+
 from abc import ABC, abstractmethod
 from numpy.polynomial import polynomial as P
 
-class PhaseHeight(ABC):
+from . import IProfilometry
+
+class IPHCalibrated(ABC):
+    """ Interface : Children require a calibration process """
+
     @abstractmethod
-    def __init__(self, calib=None):
-        self._calib = calib
+    def calibrate(self, phasemaps, heights):
+        raise NotImplementedError
 
-        self.__phasemaps_needed = 2
-
+class PhaseHeight(ABC, IProfilometry):
+    @abstractmethod
+    def __init__(self):
         self.__post_cbs = []
-
-    @abstractmethod
-    def calibrate(self, phasemaps, *args, **kwargs):
-        if (phasemaps is None): raise TypeError
         
     @abstractmethod
     def heightmap(self, phasemaps, *args, **kwargs):
-        if self._calib is None:
-            raise Exception("You need to run/load calibration data first")
-        
         if phasemaps is None: raise TypeError
+
+    @abstractmethod
+    def calibrate(self):
+        raise NotImplementedError
 
     @property
     def phasemaps_needed(self):
-        return self.__phasemaps_needed
+        return 2
     
     @property
     def post_cbs(self):
@@ -38,19 +42,17 @@ class PhaseHeight(ABC):
     def call_post_cbs(self):
         for cb in self.__post_cbs: cb()
 
-    def save_data(self, path):
-        if self._calib is None:
+class PolynomialPH(PhaseHeight):
+    def __init__(self, calib):
+        super().__init__()
+
+        if calib is None:
             raise Exception("You need to run/load calibration data first")
 
-        with open(path, "wb") as out_file:
-            np.save(out_file, self._calib)
+        self.__calib = calib
 
-class PolynomialPH(PhaseHeight):
-    def __init__(self, calib=None):
-        super().__init__(calib)
-
-        if not (self._calib is None):
-            h, w, cs = self._calib.shape
+        if not (self.__calib is None):
+            h, w, cs = self.__calib.shape
             self.__degree = cs
 
     @property
@@ -88,11 +90,11 @@ class PolynomialPH(PhaseHeight):
         ph_maps[1:] = phasemaps[1:] - ref_phase
 
         # Polynomial fit on a pixel-by-pixel basis to its height value
-        self._calib = np.empty(shape=(degree + 1, h, w), dtype=np.float64)
+        self.__calib = np.empty(shape=(degree + 1, h, w), dtype=np.float64)
 
         for y in range(h):
             for x in range(w):
-                self._calib[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=degree)
+                self.__calib[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=degree)
 
     def heightmap(self, phasemaps):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
@@ -109,9 +111,62 @@ class PolynomialPH(PhaseHeight):
 
         for y in range(h):
             for x in range(w):
-                heightmap[y, x] = P.polyval(phase_diff[y, x], self._calib[:, y, x])
+                heightmap[y, x] = P.polyval(phase_diff[y, x], self.__calib[:, y, x])
 
         return heightmap
+
+    # def save_data(self, path):
+    #     if self.__calib is None:
+    #         raise Exception("You need to run/load calibration data first")
+
+    #     
+
+class ClassicPH(PhaseHeight):
+    def __init__(self, stripe_width, cam_ref_d, cam_proj_d):
+        """ Classic phase-height model
+
+            Note: Camera and Projector must both be perpendicular to reference plane
+
+        Args:
+            stripe_width (float): Spatial frequency of fringe pattern
+            cam_ref_d (float): Z-Distance between camera and reference plane (mm)
+            cam_proj_d (float): Z-Distance between camera and projector (mm)
+        """
+
+        super().__init__()
+
+        self.__stripe_width = stripe_width
+        self.__cam_ref_d = cam_ref_d
+        self.__cam_proj_d = cam_proj_d
+    
+    @property
+    def cam_proj_d(self):
+        return self.__cam_proj_d
+    
+    @property
+    def cam_ref_d(self):
+        return self.__cam_ref_d
+
+    @property
+    def stripe_width(self):
+        return self.__stripe_width
+
+    def heightmap(self, phasemaps):
+        ref_phase = phasemaps[0]
+        meas_phase = phasemaps[1]
+
+        phase_diff = meas_phase - ref_phase
+
+        # ℎ = 𝜙𝐷𝐸 ⋅ 𝑝 ⋅ 𝑑 / 𝜙𝐷𝐸 ⋅ 𝑝 + 2𝜋𝑙
+
+        a = phase_diff * self.stripe_width * self.__cam_proj_d 
+        b = phase_diff * self.stripe_width + 2.0 * np.pi * self.__cam_ref_d
+        
+        return a / b
+
+    def calibrate(self):
+        pass
+
 
 # def linear_inverse_phase_height(imgs, dists):
 #     # Calculate least squares for each pixel
@@ -190,10 +245,7 @@ class PolynomialPH(PhaseHeight):
 #         # mesh_data.save('heightmap_mesh.stl')
 
 # class ClassicPhaseHeight(PhaseHeight):
-#     # ℎ = 𝜙𝐷𝐸 ⋅ 𝑝 ⋅ 𝑑 / 𝜙𝐷𝐸 ⋅ 𝑝 + 2𝜋𝑙
-#     # p = stripe width
-#     # d = distance between camera and reference plane
-#     # l = distance between camera and projector
+
         
 #     def __init__(self, p: float, d: float, l: float):
 #         """ p = Stripe width,
@@ -228,10 +280,6 @@ class PolynomialPH(PhaseHeight):
 #             ref_imgs = np.array([centre_crop_img(img, crop_x1, crop_y1, crop_x2, crop_y2) for img in ref_imgs])
         
 #         ref_phase, measured_phase = self.phasemap(ref_imgs), self.phasemap(imgs)
-
-#         phase_diff = measured_phase - ref_phase
-        
-#         return np.divide(self.l * phase_diff, phase_diff - (2.0 * np.pi * self.p * self.d), dtype=np.float32)
 
 # class TriangularStereoHeight(PhaseHeight):
 #     def __init__(self, ref_dist, sensor_dist, freq):

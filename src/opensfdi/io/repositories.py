@@ -2,22 +2,6 @@ import cv2
 import os
 import pickle
 
-from abc import ABC, abstractmethod
-
-class Repo(ABC):
-    @abstractmethod
-    def commit(self):
-        pass
-
-class ImageRepo(Repo):
-    @abstractmethod
-    def add_image(self, img, name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_image(self, name):
-        raise NotImplementedError
-
 class ResultRepo(Repo):
     @abstractmethod
     def add_fringe(self, imgs, name):
@@ -92,8 +76,7 @@ class BinRepo(Repo):
 
     def load_bin(self):
         if self._outdated:
-            with open(os.path.join(self._file), 'rb') as infile:
-                self._load_cache = pickle.load(infile)
+            
                 
             self._outdated = False
             
