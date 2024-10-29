@@ -5,7 +5,7 @@ from time import sleep
 
 from opensfdi.phase_shifting import PhaseShift
 from opensfdi.phase_unwrapping import PhaseUnwrap
-from opensfdi.profilometry.phase import PhaseHeight
+from opensfdi.profilometry import PhaseHeight
 from opensfdi.video import Camera, FringeProjector
 
 class Experiment(ABC):

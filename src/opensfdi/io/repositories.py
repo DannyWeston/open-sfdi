@@ -1,158 +1,228 @@
+import json
 import cv2
-import os
-import pickle
+import numpy as np
+import opensfdi.profilometry as prof
 
-class ResultRepo(Repo):
-    @abstractmethod
-    def add_fringe(self, imgs, name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def add_image(self, imgs, name):
-        raise NotImplementedError
+from abc import ABC, abstractmethod
+from pathlib import Path
 
+# Repositories
+
+class IRepository(ABC):
     @abstractmethod
-    def add_ref_image(self, imgs, name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def add_heightmap(self, heightmap, name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_fringe(self, name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_image(self, name):
-        raise NotImplementedError
+    def get(self, id):
+        pass
 
     @abstractmethod
-    def load_ref_image(self, name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_heightmap(self, name):
-        raise NotImplementedError
+    def add(self, **kwargs):
+        pass
 
-class CalibrationRepo(Repo):
     @abstractmethod
-    def add_gamma(self, data):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def add_lens(self, data):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def add_proj(self, data):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_gamma(self, cam_name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_lens(self, cam_name):
-        raise NotImplementedError
-    
-    @abstractmethod
-    def load_proj(self, proj_name):
-        raise NotImplementedError
+    def delete(self, id):
+        pass
 
-### CONCRETE IMPLEMENTATIONS ###
+    @abstractmethod
+    def update(self, id, **kwargs):
+        pass
 
-class BinRepo(Repo):
-    def __init__(self, file):
-        self._file = file
+
+# Profilometry repositories
+
+class AbstractProfilometryRepo(IRepository):
+    DIR_PREFIX = "calibration"
+    METADATA_FILE = "info.json"
+    CALIB_FILE = "calib.npy"
+
+
+# File structure repository
+
+# Need to register new types in here
+# TODO: Better model for registering types
+# Note: If you want to derive your own profilometry techniques, its important to register them in CALIB_TYPES!
+CALIB_TYPES = [
+    ("classic",     prof.PhaseHeight),
+    ("linear_inverse", prof.LinearInversePH),
+    ("polynomial",  prof.PolynomialPH),
+]
+
+def calib_type_by_name(name):
+    found = [x for x in CALIB_TYPES if x[0] == name]
+
+    if len(found) == 0: return None
+
+    return found[0][1]
+
+def calib_name_by_type(calib_type):
+    found = [x for x in CALIB_TYPES if x[1] == calib_type]
+
+    if len(found) == 0: return None
+
+    return found[0][0]
+
+def get_incremental_path(search):
+    i = 0
+
+    test = None
+
+    while True:
+        test = Path(f"{str(search)}{i}")
+
+        if not test.exists(): break
+
+        i += 1
+
+    return test
+
+class FSConfig:
+    def __init__(self, ROOT_DIR: Path):
+        self.__root_dir = ROOT_DIR                          # Root of the entire codebase
+        self.__data_dir = ROOT_DIR / "data"                 # IO data location
+        self.__results_dir = self.__data_dir / "results"           # Directory for results to be written to
+        self.__fringes_dir = self.__data_dir / "fringes"           # Fringes are to be used from this directory
+        self.__calibration_dir = self.__data_dir / "calibration"   # Location where calibration data is dumped
+
+    def make_structure(self):
+        self.root_dir.mkdir(exist_ok=True)
+        self.data_dir.mkdir(exist_ok=True)
+        self.calibration_dir.mkdir(exist_ok=True)
+        self.fringes_dir.mkdir(exist_ok=True)
+        self.results_dir.mkdir(exist_ok=True)
+
+    @property
+    def root_dir(self) -> Path:
+        return self.__root_dir
+    
+    @property
+    def data_dir(self) -> Path:
+        return self.__data_dir
+    
+    @property
+    def results_dir(self) -> Path:
+        return self.__results_dir
+    
+    @property
+    def fringes_dir(self) -> Path:
+        return self.__fringes_dir
+    
+    @property
+    def calibration_dir(self) -> Path:
+        return self.__calibration_dir
+
+class FileProfilometryRepo(AbstractProfilometryRepo):
+    def __init__(self, output_dir: Path):
+        self.__output_dir = output_dir
+
+    def get(self, id) -> prof.PhaseHeight:
+        # Check if calibration with name exists
+        folder = self.__output_dir / id
+
+        if not folder.exists(): return
         
-        self._outdated = True
-        self._load_cache = None
+        # Check if metadata exists
+        meta_path = folder / AbstractProfilometryRepo.METADATA_FILE
 
-        self._changes = []
-
-    def add_bin(self, data):
-        self._changes.append(data)
-
-    def load_bin(self):
-        if self._outdated:
-            
-                
-            self._outdated = False
-            
-        return self._load_cache
-
-    def commit(self):
-        out = {}
-        for d in self._changes:
-            out = out | d
+        if not meta_path.exists(): return None
         
-        with open(os.path.join(self._file), 'wb') as outfile:
-            pickle.dump(out, outfile, protocol=pickle.HIGHEST_PROTOCOL)
+        with open(meta_path, "r") as meta_file:
+            metadata = json.load(meta_file)
 
-        self._outdated = True
 
-class FileImageRepo(ImageRepo):
-    def __init__(self, path):
-        self._path = path
-        self._changes = {}
+        # Try to identify type
+        calib_name = metadata["type"]
+        calib_type = calib_type_by_name(calib_name)
 
-    def add_image(self, img, name):
-        self._changes[name] = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+        if calib_type is None: return None
 
-    def load_image(self, name):
-        # BGR Format
-        return cv2.imread(os.path.join(self._path, name), cv2.IMREAD_COLOR)
 
-    def commit(self):
-        # Write all images
-        for name, img in self._changes.items():
-            cv2.imwrite(os.path.join(self._path, name), img)
-
-        self._changes = dict()
-
-class BinCalibrationRepo(CalibrationRepo):
-    def __init__(self, file):
-        self._repo = BinRepo(file)
+        # Try to load data using path
+        data_path: Path = folder / metadata["data_path"]
         
-        self._data = dict()
+        if not data_path.exists(): return None
+        
+        with open(data_path, "rb") as data_file:
+            calib_data = np.load(data_file)
 
-    def add_gamma(self, data):
-        cam_name = data.camera.name
-        
-        self.__if_ne(cam_name)
-        
-        self._data[cam_name]["gamma"] = data.serialize()
-    
-    def add_lens(self, data):
-        cam_name = data.camera.name
-        
-        self.__if_ne(cam_name)
-        
-        self._data[cam_name]["lens"] = data.serialize()
+        # Some function to resolve calib_type
+        return calib_type(calib_data)
 
-    def add_proj(self, data):
-        projector = data.projector.name
+    def add(self, prof: prof.PhaseHeight):
+        # Check if calibration type is registered
+        calib_type = type(prof)
+        calib_name = calib_name_by_type(calib_type)
+
+        if calib_name is None: raise Exception(f"Could not find a registered calibration type for \"{calib_type}\"")
+
         
-        self._data[proj_name] = data.serialize()
-    
-    def load_gamma(self, cam_name):
-        data = self._repo.load_bin()[cam_name]
-        return data["gamma"]
-    
-    def load_lens(self, cam_name):
-        data = self._repo.load_bin()[cam_name]
-        return data["lens"]
-    
-    def load_proj(self, proj_name):
-        #data = self._repo.load_bin()[proj_name]
-        return None
-    
-    def commit(self):
-        self._repo.add_bin(self._data)
+        # Get new calibration directory (make one)
+        folder = get_incremental_path(self.__output_dir / calib_name)
+        folder.mkdir(exist_ok=True) # Shouldn't exist already, but ignore if it does
+
+
+        # Make metadata file
+        meta_path = folder / AbstractProfilometryRepo.METADATA_FILE
         
-        self._repo.commit()
+        metadata = dict()
+        metadata["type"] = calib_name
+        metadata["data_path"] = AbstractProfilometryRepo.CALIB_FILE
+
+        with open(meta_path, "w") as meta_file:
+            metadata = json.dump(metadata, meta_file, indent=4)
+
+
+        # Write data to disk
+        with open(folder / AbstractProfilometryRepo.CALIB_FILE, "wb") as data_file:
+            np.save(data_file, prof.calib_data)
+
+    # Not needed !
+    def delete(self, id:int) -> None:
+        pass
+
+    def update(self, id:int, **kwargs):
+        raise NotImplementedError
+
+
+# Image repositories
+
+class AbstractImageRepository(IRepository):
+    @abstractmethod
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def get(self, id):
+        pass
+
+    @abstractmethod
+    def add(self, **kwargs):
+        pass
+
+    # Don't need implementations
+
+    def delete(self, id):
+        pass
+
+    def update(self, id, **kwargs):
+        pass
+
+class FileImageRepository(AbstractImageRepository):
+    DEFAULT_EXT = ".png"
+
+    def __init__(self, output_dir: Path):
+        self.__output_dir = output_dir
+
+    def get(self, name: str):
+        if name is None: raise TypeError
         
-    def __if_ne(self, name):
-        if not (name in self._data):
-            self._data[name] = dict()
+        path = self.__output_dir / f"{name}{FileImageRepository.DEFAULT_EXT}"
+
+        if not path.exists(): return None
+
+        return cv2.imread(str(path.resolve()), cv2.IMREAD_UNCHANGED)
+
+    def add(self, img, name):
+        path = self.__output_dir / f"{name}{FileImageRepository.DEFAULT_EXT}"
+        
+        if path.exists(path):
+            path = get_incremental_path(path)
+
+        cv2.imwrite(str(path.resolve()), img, [cv2.IMWRITE_PNG_COMPRESSION, 0])
