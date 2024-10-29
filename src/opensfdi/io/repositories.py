@@ -26,14 +26,6 @@ class IRepository(ABC):
         pass
 
 
-# Profilometry repositories
-
-class AbstractProfilometryRepo(IRepository):
-    DIR_PREFIX = "calibration"
-    METADATA_FILE = "info.json"
-    CALIB_FILE = "calib.npy"
-
-
 # File structure repository
 
 # Need to register new types in here
@@ -73,53 +65,20 @@ def get_incremental_path(search):
 
     return test
 
-class FSConfig:
-    def __init__(self, ROOT_DIR: Path):
-        self.__root_dir = ROOT_DIR                          # Root of the entire codebase
-        self.__data_dir = ROOT_DIR / "data"                 # IO data location
-        self.__results_dir = self.__data_dir / "results"           # Directory for results to be written to
-        self.__fringes_dir = self.__data_dir / "fringes"           # Fringes are to be used from this directory
-        self.__calibration_dir = self.__data_dir / "calibration"   # Location where calibration data is dumped
-
-    def make_structure(self):
-        self.root_dir.mkdir(exist_ok=True)
-        self.data_dir.mkdir(exist_ok=True)
-        self.calibration_dir.mkdir(exist_ok=True)
-        self.fringes_dir.mkdir(exist_ok=True)
-        self.results_dir.mkdir(exist_ok=True)
-
-    @property
-    def root_dir(self) -> Path:
-        return self.__root_dir
-    
-    @property
-    def data_dir(self) -> Path:
-        return self.__data_dir
-    
-    @property
-    def results_dir(self) -> Path:
-        return self.__results_dir
-    
-    @property
-    def fringes_dir(self) -> Path:
-        return self.__fringes_dir
-    
-    @property
-    def calibration_dir(self) -> Path:
-        return self.__calibration_dir
+class AbstractProfilometryRepo(IRepository):
+    METADATA_FILE = "info.json"
+    CALIB_FILE = "calib.npy"
 
 class FileProfilometryRepo(AbstractProfilometryRepo):
-    def __init__(self, output_dir: Path):
-        self.__output_dir = output_dir
+    def __init__(self):
+        super().__init__()
 
-    def get(self, id) -> prof.PhaseHeight:
+    def get(self, id: Path) -> prof.PhaseHeight:
         # Check if calibration with name exists
-        folder = self.__output_dir / id
-
-        if not folder.exists(): return
+        if not id.exists(): return None
         
         # Check if metadata exists
-        meta_path = folder / AbstractProfilometryRepo.METADATA_FILE
+        meta_path = id / AbstractProfilometryRepo.METADATA_FILE
 
         if not meta_path.exists(): return None
         
@@ -135,7 +94,7 @@ class FileProfilometryRepo(AbstractProfilometryRepo):
 
 
         # Try to load data using path
-        data_path: Path = folder / metadata["data_path"]
+        data_path: Path = id / metadata["data_path"]
         
         if not data_path.exists(): return None
         
@@ -145,7 +104,7 @@ class FileProfilometryRepo(AbstractProfilometryRepo):
         # Some function to resolve calib_type
         return calib_type(calib_data)
 
-    def add(self, prof: prof.PhaseHeight):
+    def add(self, prof: prof.PhaseHeight, id: Path):
         # Check if calibration type is registered
         calib_type = type(prof)
         calib_name = calib_name_by_type(calib_type)
@@ -154,9 +113,8 @@ class FileProfilometryRepo(AbstractProfilometryRepo):
 
         
         # Get new calibration directory (make one)
-        folder = get_incremental_path(self.__output_dir / calib_name)
+        folder = get_incremental_path(id / calib_name)
         folder.mkdir(exist_ok=True) # Shouldn't exist already, but ignore if it does
-
 
         # Make metadata file
         meta_path = folder / AbstractProfilometryRepo.METADATA_FILE
@@ -179,7 +137,6 @@ class FileProfilometryRepo(AbstractProfilometryRepo):
 
     def update(self, id:int, **kwargs):
         raise NotImplementedError
-
 
 # Image repositories
 
@@ -205,24 +162,14 @@ class AbstractImageRepository(IRepository):
         pass
 
 class FileImageRepository(AbstractImageRepository):
-    DEFAULT_EXT = ".png"
+    def __init__(self, overwrite=True):
+        self.__overwrite = overwrite
 
-    def __init__(self, output_dir: Path):
-        self.__output_dir = output_dir
+    def get(self, id: Path):
+        if not id.exists(): return None
 
-    def get(self, name: str):
-        if name is None: raise TypeError
-        
-        path = self.__output_dir / f"{name}{FileImageRepository.DEFAULT_EXT}"
+        return cv2.imread(str(id.resolve()), cv2.IMREAD_UNCHANGED)
 
-        if not path.exists(): return None
-
-        return cv2.imread(str(path.resolve()), cv2.IMREAD_UNCHANGED)
-
-    def add(self, img, name):
-        path = self.__output_dir / f"{name}{FileImageRepository.DEFAULT_EXT}"
-        
-        if path.exists(path):
-            path = get_incremental_path(path)
-
-        cv2.imwrite(str(path.resolve()), img, [cv2.IMWRITE_PNG_COMPRESSION, 0])
+    def add(self, img, id: Path):
+        if (not id.exists()) or self.__overwrite:
+            cv2.imwrite(str(id.resolve()), img, [cv2.IMWRITE_PNG_COMPRESSION, 0])

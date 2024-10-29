@@ -1,12 +1,10 @@
 import numpy as np
 import opensfdi.io.repositories as repos
 
-from pathlib import Path
-
 # Image service
 
 class ImageService:
-    def __init__(self, img_repo: repos.AbstractImageRepository):
+    def __init__(self, img_repo: repos.AbstractImageRepository = repos.FileImageRepository()):
         self._img_repo = img_repo
 
     def save_image(self, img, name):
@@ -30,14 +28,12 @@ class ImageService:
 
 # Experiment service
 
-PH_CALIB_REPO = Path("calibration")
-
 class ExperimentService:
-    def __init__(self, ph_calib_repo = repos.FileImageRepository(PH_CALIB_REPO)):
+    def __init__(self, ph_calib_repo = repos.FileProfilometryRepo()):
         self._prof_calib_repo = ph_calib_repo
 
-    def save_ph_calib(self, calib):
-        self._prof_calib_repo.add(calib)
+    def save_ph_calib(self, calib, id):
+        self._prof_calib_repo.add(calib, id)
 
     def load_ph_calib(self, name):
         calib = self._prof_calib_repo.get(name)
