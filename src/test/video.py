@@ -19,7 +19,7 @@ class FakeCamera(Camera):
 
         next_img = self.__imgs.pop(0)
 
-        # Readd the image to the queue if consuming is disabled
+        # Re-add the image to the queue if consuming is disabled
         if not self.__consume: self.__imgs.append(next_img)
 
         return next_img

@@ -1,49 +1,80 @@
 import numpy as np
+import pydantic
 
+from typing import Optional, Callable
 from abc import ABC, abstractmethod
 from numpy.polynomial import polynomial as P
 
 # Interfaces / Abstract classes
 
-class IProfilometry(ABC):
+class BaseProf(pydantic.BaseModel, ABC):
+    name: str
+    phasemaps: int = 2
+    data: Optional[np.ndarray] = None
+
+    model_config = pydantic.ConfigDict(extra='allow', arbitrary_types_allowed=True)
+
+    _post_cbs = list[Callable]
+
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if not issubclass(v, BaseProfCalibration):
+            raise ValueError("Invalid Object")
+
+        return v
+    
     @abstractmethod
-    def __init__(self):
-        pass
+    def calibrate(self, phasemaps, heights):
+        if (heights is None): raise TypeError
+
+        # Check passed number of heights equals number of img steps
+        if (li := len(phasemaps)) != (lh := len(heights)):
+            raise ValueError(f"You must provide an equal number of heights to phasemaps ({li} and {lh} given)")
 
     @abstractmethod
-    def heightmap(self, **kwargs):
-        pass
+    def heightmap(self, phasemaps):
+        # Check passed number of heights equals number of img steps
+        if (li := len(phasemaps)) != (lh := len(self.phasemaps)):
+            raise Exception(f"Provided number of phase maps is incorrect ({li} passed, {lh} needed)")
 
-class IFringeProfilometry(IProfilometry):
-    @abstractmethod
-    def __init__(self):
-        pass
+    @property
+    def post_cbs(self):
+        return self._post_cbs
 
-    @abstractmethod
-    def heightmap(self, **kwargs):
-        pass
+    def add_post_ref_cb(self, cb: Callable):
+        """ TODO: Add description """
+        self._post_cbs.append(cb)
 
-    @abstractmethod
-    def phasemaps_needed(self) -> int:
-        pass
+    def call_post_cbs(self):
+        for cb in self._post_cbs: cb()    
 
-class PhaseHeight(IFringeProfilometry):
-    """ Classic phase-height model
+    def __str__(self):
+        return f"Calibration: {self.name}"
+
+class ClassicProf(BaseProf):
+    """ 
+        Classic phase-height model
 
         Note: Camera and Projector must both be perpendicular to reference plane
 
         Extend this class and overload the calibrate / heightmap methods for your own functionality
 
-    Args:
-        calib_data : Calibration data required for heightmap reconstruction
+        Args:
+            name : Name (id-like) associated with the calibration
+            data : Calibration data required for heightmap reconstruction
     """
-     
-    def __init__(self, calib_data=None):
-        self.__post_cbs = []
 
-        self._calib_data = calib_data
+    def calibrate(self, phasemaps, heights):
+        pass
 
     def heightmap(self, phasemaps):
+        """ TODO: Complete documentation """
+        super().heightmap(phasemaps)
+
         ref_phase = phasemaps[0]
         meas_phase = phasemaps[1]
 
@@ -56,32 +87,10 @@ class PhaseHeight(IFringeProfilometry):
         
         return a / b
 
-    def calibrate(self, phasemaps, heights):
-        return None
-    
-    @property
-    def calib_data(self):
-        return self._calib_data
+    def __str__(self):
+        return f"Classic Calibration: {self.name}"
 
-    @property
-    def phasemaps_needed(self) -> int:
-        return 2
-
-    @property
-    def post_cbs(self):
-        return self.__post_cbs
-        
-    def add_post_ref_cb(self, cb):
-        """ TODO: Add description """
-        self.__post_cbs.append(cb)
-
-    def call_post_cbs(self):
-        for cb in self.__post_cbs: cb()
-
-class LinearInversePH(PhaseHeight):
-    def __init__(self, calib_data=None):
-        super().__init__(calib_data)
-        
+class LinearInverseProf(BaseProf):
     def calibrate(self, phasemaps, heights):
         """
             The linear inverse calibration model for fringe projection setups.
@@ -93,11 +102,7 @@ class LinearInversePH(PhaseHeight):
                 Δ𝜙(x, y) = h(x, y)Δ𝜙(x, y)a(x, y) + h(x, y)b(x, y)
         """
 
-        if (heights is None): raise TypeError
-
-        # Check passed number of heights equals numebr of img steps
-        if (li := len(phasemaps)) != (lh := len(heights)): 
-            raise ValueError(f"You must provide an equal number of heights to phasemaps ({li} and {lh} given)")
+        super().calibrate(phasemaps, heights)
 
         # Calculate phase difference maps at each height
         # Phase difference between ref and h = 0 is zero
@@ -126,9 +131,7 @@ class LinearInversePH(PhaseHeight):
     def heightmap(self, phasemaps):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
 
-        # Check if number of phasemaps passed was correct
-        if len(phasemaps) != self.phasemaps_needed:
-            raise Exception(f"Provided number of phase maps is incorrect ({len(phasemaps)} passed, {self.phasemaps_needed} needed)")
+        super().heightmap(phasemaps)
 
         # Obtain phase difference
         ref_phase = phasemaps[0]
@@ -145,25 +148,12 @@ class LinearInversePH(PhaseHeight):
 
         return heightmap
 
-class PolynomialPH(PhaseHeight):
-    def __init__(self, calib_data=None, degree=5):
-        super().__init__(calib_data)
+    def __str__(self):
+        return f"Linear Inverse Calibration: {self.name}"
 
-        if not (self.calib_data is None):
-            cs, h, w = self.calib_data.shape
-            self.__degree = cs
-            
-        elif degree is None:
-            raise Exception("You must provide a degree or existing calibration data for the calibration")
-        
-        else:
-            self.__degree = degree
+class PolynomialProf(BaseProf):
+    degree: Optional[int]
 
-    @property
-    def degree(self):
-        """ The degree of the polynomial used for the last calibration """
-        return self.__degree
-        
     def calibrate(self, phasemaps, heights):
         """
             The polynomial calibration model for fringe projection setups.
@@ -173,14 +163,10 @@ class PolynomialPH(PhaseHeight):
                 - The first phasemap is taken to be the reference phasemap
         """
 
-        if (heights is None): raise TypeError
+        super().calibrate(phasemaps, heights)
 
         # Check polynomial degree is greater than zero
         if self.degree < 1: raise ValueError("Degree of the polynomial must be greater than zero")
-
-        # Check passed number of heights equals numebr of img steps
-        if (li := len(phasemaps)) != (lh := len(heights)): 
-            raise ValueError(f"You must provide an equal number of heights to phasemaps ({li} and {lh} given)")
 
         # Calculate phase difference maps at each height
         # Phase difference between ref and h = 0 is zero
@@ -200,10 +186,7 @@ class PolynomialPH(PhaseHeight):
 
     def heightmap(self, phasemaps):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
-
-        # Check if number of phasemaps passed was correct
-        if len(phasemaps) != self.phasemaps_needed:
-            raise Exception(f"Provided number of phase maps is incorrect ({len(phasemaps)} passed, {self.phasemaps_needed} needed)")
+        super().heightmap(phasemaps)
 
         # Obtain phase difference
         ref_phase = phasemaps[0]
@@ -220,11 +203,26 @@ class PolynomialPH(PhaseHeight):
 
         return heightmap
 
-    # def save_data(self, path):
-    #     if self.__calib is None:
-    #         raise Exception("You need to run/load calibration data first")
+    def __str__(self):
+        return f"Polynomial Calibration: {self.name}, degree {self.degree}"
 
-    #     
+# class ProfEnum(Enum):
+#     PhaseHeight = 1
+#     LinearInverse = 2
+#     Polynomial = 3
+
+#     def as_prof_type(self):
+#         if self == ProfEnum.PhaseHeight:
+#             return PhaseHeight
+
+#         if self == ProfEnum.Polynomial: 
+#             return PolynomialPH
+    
+#         if self == ProfEnum.LinearInverse:
+#             return LinearInversePH
+        
+#         raise Exception("Could not identify profilometry method from enum")
+
 
 # class TriangularStereoHeight(PhaseHeight):
 #     def __init__(self, ref_dist, sensor_dist, freq):

@@ -1,6 +1,36 @@
 import numpy as np
 
 from abc import ABC, abstractmethod
+from skimage.restoration import unwrap_phase
+
+# Phase Unwrapping
+
+class PhaseUnwrap(ABC):
+    @abstractmethod
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def unwrap(self, phasemaps, *args, **kwargs):
+        """ TODO: Write description """
+        pass
+
+class ReliabilityPhaseUnwrap(PhaseUnwrap):
+    def __init__(self, wrap_around=False):
+        """ TODO: Write description """
+        self.__wrap_around = wrap_around
+
+    def unwrap(self, phasemaps):
+        """ TODO: Write description """
+        # Simple passthrough to existing library
+        return unwrap_phase(phasemaps, wrap_around=self.__wrap_around)
+
+class TemporalPhaseUnwrap(ABC):
+    def __init__(self):
+        pass
+
+
+# Phase Shifting
 
 class PhaseShift(ABC):
     @abstractmethod

@@ -4,8 +4,6 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 
-from opensfdi import DEBUG
-
 from abc import ABC, abstractmethod
 
 def apply_correction(img, coeffs, x1=0.0, x2=1.0):
@@ -75,16 +73,15 @@ class GammaCalibration(Calibration):
         self.coeffs = np.polyfit(vis_averages, vis_intensities, self._order)
         self.visible = intensities[s:f+1]
 
-        if DEBUG: # Plot results
-            plt.plot(vis_averages, vis_intensities, 'o')
-            trendpoly = np.poly1d(self.coeffs)
-            plt.title('Gamma Calibration Curve Results')
-            
-            plt.xlabel("Measured")
-            plt.ylabel("Actual")
-            
-            plt.plot(vis_averages, trendpoly(vis_averages))
-            plt.show()
+        plt.plot(vis_averages, vis_intensities, 'o')
+        trendpoly = np.poly1d(self.coeffs)
+        plt.title('Gamma Calibration Curve Results')
+        
+        plt.xlabel("Measured")
+        plt.ylabel("Actual")
+        
+        plt.plot(vis_averages, trendpoly(vis_averages))
+        plt.show()
 
         return self.coeffs, self.visible
 
