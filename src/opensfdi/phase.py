@@ -1,14 +1,25 @@
 import numpy as np
+import pydantic
+
+from typing import Optional, Callable
 
 from abc import ABC, abstractmethod
 from skimage.restoration import unwrap_phase
 
 # Phase Unwrapping
 
-class PhaseUnwrap(ABC):
-    @abstractmethod
-    def __init__(self):
-        pass
+class PhaseUnwrap(pydantic.BaseModel, ABC):
+    
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if not issubclass(v, PhaseShift):
+            raise ValueError("Invalid Object")
+
+        return v
 
     @abstractmethod
     def unwrap(self, phasemaps, *args, **kwargs):
@@ -16,39 +27,38 @@ class PhaseUnwrap(ABC):
         pass
 
 class ReliabilityPhaseUnwrap(PhaseUnwrap):
-    def __init__(self, wrap_around=False):
-        """ TODO: Write description """
-        self.__wrap_around = wrap_around
+    wrap_around: bool = False
 
     def unwrap(self, phasemaps):
         """ TODO: Write description """
         # Simple passthrough to existing library
-        return unwrap_phase(phasemaps, wrap_around=self.__wrap_around)
+        return unwrap_phase(phasemaps, wrap_around=self.wrap_around)
 
-class TemporalPhaseUnwrap(ABC):
-    def __init__(self):
-        pass
+class TemporalPhaseUnwrap(PhaseUnwrap):
+    pass
 
 
 # Phase Shifting
 
-class PhaseShift(ABC):
-    @abstractmethod
-    def __init__(self, required_imgs: int):
-        if required_imgs <= 0:
-            raise ValueError("Required images less than or equal to zero")
-        
-        # raise Exception(f"You need at least 3 phases to run an N-step experiment ({steps} provided)")
+class PhaseShift(pydantic.BaseModel, ABC):
+    phase_count: int = 3
 
-        self.__required_imgs = required_imgs
+    model_config = pydantic.ConfigDict(extra='allow', arbitrary_types_allowed=True)
 
-    @property
-    def required_imgs(self):
-        return self.__required_imgs
-    
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if not issubclass(v, PhaseShift):
+            raise ValueError("Invalid Object")
+
+        return v
+
     @abstractmethod
-    def get_phases(self):
-        pass
+    def get_phases(self) -> list[np.ndarray]:
+        raise NotImplementedError
 
     @abstractmethod
     def shift(self, imgs, *args, **kwargs):
@@ -57,27 +67,18 @@ class PhaseShift(ABC):
         if len(imgs) == 0: raise ValueError("Images passed has length zero")
 
 class NStepPhaseShift(PhaseShift):
-    def __init__(self, steps):
-        super().__init__(steps)
-
-    def shift(self, imgs, steps=3):
+    def shift(self, imgs):
         super().shift(imgs)
 
-        if steps < 3: raise Exception(f"You need at least 3 phases to run an N-step experiment ({steps} provided)")
+        p = np.zeros_like(imgs[0], dtype=np.float64)
+        q = np.zeros_like(imgs[0], dtype=np.float64)
 
-        N = len(imgs)
-
-        p = np.zeros(shape=imgs[0].shape, dtype=np.float64)
-        q = np.zeros(shape=imgs[0].shape, dtype=np.float64)
-        
         # Accumulate phases
-        for i, img in enumerate(imgs):
-            phase = (2.0 * np.pi * i) / N
-
+        for phase, img in zip(self.get_phases(), imgs, strict=True):
             p += img * np.sin(phase)
             q += img * np.cos(phase)
 
         return -np.arctan2(p, q)
     
-    def get_phases(self):
-        return np.arange(self.required_imgs) * 2.0 * np.pi / self.required_imgs
+    def get_phases(self) -> list[np.ndarray]:
+        return np.arange(self.phase_count) * 2.0 * np.pi / self.phase_count

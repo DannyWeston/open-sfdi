@@ -60,38 +60,14 @@ class Camera(Protocol):
         
     #     return img
 
-# class FakeCamera(Camera):
-#     def __init__(self, imgs=[], name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):
-#         super().__init__(name='Camera1', cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
-        
-#         self.img_num = 0
+# class MotorStage(Protocol):
+#     @property
+#     def min_height(self) -> float:
+#         pass
 
-#         self.imgs = imgs
-
-#     def capture(self):
-#         img = next(self.imgs)
-        
-#         if not self.loop and len(self.imgs) <= self.img_num:
-#             self.img_num = 0
-#             return None
-        
-#         self.img_num += 1
-        
-#         self.logger.info(f'Returning an image')
-
-#         return img
+#     @property
+#     def max_height(self) -> float:
+#         pass
     
-#     def __iter__(self):
-#         return iter(self.imgs)
-
-#     def add_image(self, img):
-#         self._images.append(img)
-#         return self
-
-# class FileCamera(FakeCamera):
-    # def __init__(self, img_paths, name='Camera1', cam_mat=None, dist_mat = None, optimal_mat=None):
-    #     super().__init__(name='Camera1', cam_mat=cam_mat, dist_mat=dist_mat, optimal_mat=optimal_mat)
-        
-    #     # Load all images into memory
-    #     for path in img_paths:
-    #         self.imgs.append(cv2.imread(path, 1))
+#     def move_to(self, value):
+#         raise NotImplementedError

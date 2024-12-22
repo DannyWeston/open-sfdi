@@ -1,20 +1,19 @@
 import numpy as np
 import pydantic
 
-from typing import Optional, Callable
+from typing import Optional
 from abc import ABC, abstractmethod
 from numpy.polynomial import polynomial as P
 
 # Interfaces / Abstract classes
 
 class BaseProf(pydantic.BaseModel, ABC):
-    name: str
     phasemaps: int = 2
+    needs_motor_stage: bool = True
+
     data: Optional[np.ndarray] = None
 
     model_config = pydantic.ConfigDict(extra='allow', arbitrary_types_allowed=True)
-
-    _post_cbs = list[Callable]
 
     @classmethod
     def __get_validators__(cls):
@@ -22,38 +21,30 @@ class BaseProf(pydantic.BaseModel, ABC):
 
     @classmethod
     def validate(cls, v):
-        if not issubclass(v, BaseProfCalibration):
+        if not issubclass(v, BaseProf):
             raise ValueError("Invalid Object")
 
         return v
-    
+
     @abstractmethod
     def calibrate(self, phasemaps, heights):
         if (heights is None): raise TypeError
 
         # Check passed number of heights equals number of img steps
-        if (li := len(phasemaps)) != (lh := len(heights)):
-            raise ValueError(f"You must provide an equal number of heights to phasemaps ({li} and {lh} given)")
+        if (ph_count := phasemaps.shape[0]) != (h_count := heights.shape[0]):
+            raise Exception(f"You must provide an equal number of heights to phasemaps ({ph_count} phasemaps, {h_count} heights given)")
 
     @abstractmethod
     def heightmap(self, phasemaps):
+        # TODO: None check for phasemaps
+
         # Check passed number of heights equals number of img steps
-        if (li := len(phasemaps)) != (lh := len(self.phasemaps)):
+        if (li := phasemaps.shape[0]) != (lh := self.phasemaps):
             raise Exception(f"Provided number of phase maps is incorrect ({li} passed, {lh} needed)")
 
-    @property
-    def post_cbs(self):
-        return self._post_cbs
-
-    def add_post_ref_cb(self, cb: Callable):
-        """ TODO: Add description """
-        self._post_cbs.append(cb)
-
-    def call_post_cbs(self):
-        for cb in self._post_cbs: cb()    
-
     def __str__(self):
-        return f"Calibration: {self.name}"
+        ran = "Not calibrated" if self.data is None else "Calibrated"
+        return f"{type(self)} : {ran}"
 
 class ClassicProf(BaseProf):
     """ 
@@ -82,13 +73,12 @@ class ClassicProf(BaseProf):
 
         # h = 𝜙𝐷𝐸 ⋅ 𝑝 ⋅ 𝑑 / 𝜙𝐷𝐸 ⋅ 𝑝 + 2𝜋𝑙
 
-        a = phase_diff * self.calib_data[0] * self.calib_data[2]
-        b = phase_diff * self.calib_data[0] + 2.0 * np.pi * self.calib_data[1]
+        a = phase_diff * self.data[0] * self.data[2]
+        b = phase_diff * self.data[0] + 2.0 * np.pi * self.data[1]
         
-        return a / b
-
-    def __str__(self):
-        return f"Classic Calibration: {self.name}"
+        self.data = a / b
+        
+        return self.data
 
 class LinearInverseProf(BaseProf):
     def calibrate(self, phasemaps, heights):
@@ -114,7 +104,7 @@ class LinearInverseProf(BaseProf):
         ph_maps[1:] = phasemaps[1:] - ref_phase
 
         # Least squares fit on a pixel-by-pixel basis to its height value (a, b)
-        self._calib_data = np.empty(shape=(2, h, w), dtype=np.float64)
+        self.data = np.empty(shape=(2, h, w), dtype=np.float64)
 
         # Δ𝜙(x, y) = h(x, y)Δ𝜙(x, y)a(x, y) + h(x, y)b(x, y)
 
@@ -125,34 +115,29 @@ class LinearInverseProf(BaseProf):
                 A = np.vstack([t, np.ones(len(t))]).T
                 m, c = np.linalg.lstsq(A, heights)[0]
 
-                self._calib_data[0, y, x] = m
-                self._calib_data[1, y, x] = c
+                self.data[0, y, x] = m
+                self.data[1, y, x] = c
 
     def heightmap(self, phasemaps):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
 
         super().heightmap(phasemaps)
 
-        # Obtain phase difference
-        ref_phase = phasemaps[0]
-        img_phase = phasemaps[1]
-        phase_diff = img_phase - ref_phase
+        # Obtain phase difference (reference phasemap should be first, measurement second)
+        phase_diff = phasemaps[1] - phasemaps[0]
 
         # Apply calibrated polynomial values to each pixel of the phase difference
         h, w = phase_diff.shape
-        heightmap = np.zeros_like(phase_diff)
+        self.data = np.empty_like(phase_diff)
 
         for y in range(h):
             for x in range(w):
-                heightmap[y, x] = phase_diff[y, x] / (phase_diff[y, x] * self._calib_data[0, y, x] + self._calib_data[1, y, x])
+                self.data [y, x] = phase_diff[y, x] / (phase_diff[y, x] * self.data[0, y, x] + self.data[1, y, x])
 
-        return heightmap
-
-    def __str__(self):
-        return f"Linear Inverse Calibration: {self.name}"
+        return self.data
 
 class PolynomialProf(BaseProf):
-    degree: Optional[int]
+    degree: Optional[int] = 5
 
     def calibrate(self, phasemaps, heights):
         """
@@ -170,19 +155,20 @@ class PolynomialProf(BaseProf):
 
         # Calculate phase difference maps at each height
         # Phase difference between ref and h = 0 is zero
-        z, h, w = phasemaps.shape
-        ref_phase = phasemaps[0] # Assume reference phasemap is first entry
+        _, h, w = phasemaps.shape
 
-        ph_maps = np.empty(shape=(z, h, w))
-        ph_maps[0] = 0.0
-        ph_maps[1:] = phasemaps[1:] - ref_phase
+        ph_maps = np.empty_like(phasemaps)
+        ph_maps[0] = 0.0                            # Phase difference between baseline and baseline is 0.0
+        ph_maps[1:] = phasemaps[1:] - phasemaps[0]  # Phase difference between baseline and height-increments
 
         # Polynomial fit on a pixel-by-pixel basis to its height value
-        self._calib_data = np.empty(shape=(self.degree + 1, h, w), dtype=np.float64)
+        self.data = np.empty(shape=(self.degree + 1, h, w), dtype=np.float64)
 
         for y in range(h):
             for x in range(w):
-                self._calib_data[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=self.degree)
+                self.data[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=self.degree)
+
+        return self.data
 
     def heightmap(self, phasemaps):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
@@ -199,12 +185,9 @@ class PolynomialProf(BaseProf):
 
         for y in range(h):
             for x in range(w):
-                heightmap[y, x] = P.polyval(phase_diff[y, x], self._calib_data[:, y, x])
+                heightmap[y, x] = P.polyval(phase_diff[y, x], self.data[:, y, x])
 
         return heightmap
-
-    def __str__(self):
-        return f"Polynomial Calibration: {self.name}, degree {self.degree}"
 
 # class ProfEnum(Enum):
 #     PhaseHeight = 1

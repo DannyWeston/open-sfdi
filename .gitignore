@@ -5,6 +5,8 @@ poetry.lock
 
 .vscode/
 
+.venv/**
+
 .venv/2
 **/__pycache__
 

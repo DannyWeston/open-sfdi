@@ -1,87 +1,94 @@
 import numpy as np
 import pytest
-
-from pathlib import Path
+import tkinter as tk
 
 import opensfdi.phase as phase
 import opensfdi.profilometry as prof
 
-from opensfdi.services import ExperimentService, ImageService, FileProfRepo, FileImageRepo
-from opensfdi.experiment import FPExperiment
-from opensfdi.utils import show_surface, show_heightmap
-
-from test.video import FakeCamera, FakeFringeProjector
-
-import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog
 
+from opensfdi.services import ExperimentService, FileExperimentRepo, FileImageRepo
+from opensfdi.experiment import Experiment
+from test.video import FakeCamera, FakeFringeProjector
+
 root = tk.Tk()
+root.wm_attributes('-topmost', 1)
 root.withdraw()
 
-def test_calibration():
-    # Declare paths for loading stuff
-    img_repo = FileImageRepo(storage_dir=Path(filedialog.askdirectory(title="Where to load images from:")))
-    img_service = ImageService(img_repo)
+@pytest.mark.skip(reason="Not ready")
+def test_ph_calib():
+    exp_path = Path(filedialog.askdirectory(title="What experiment directory to use?"))
+    ex_service = ExperimentService(FileExperimentRepo(exp_path), FileImageRepo(exp_path))
 
-    count = 7
-    phases = 12
-    heights = np.linspace(0.0, 24.0, count, dtype=np.float64)
-    imgs = []
+    imgs = ex_service.load_imgs("calibration_*") # Load the calibration images
+    heights = imgs.shape[0]
 
-    # Load all of the test images
+    # Make the mock devices
+    fake_camera = FakeCamera(np.mean(imgs, axis=3))
+    fake_proj = FakeFringeProjector()
 
-    for i in range(count):
-        for j in range(phases):
-            img = img_service.load_image(f"height{i}_phase{j+1}.jpg")
-            img = np.mean(img, axis=2)
-
-            if img is None: raise Exception(f"Could not load image")
-        
-            imgs.append(img)
-
-    print("Starting polynomial calibration...")
-
-    # Calculate phasemap difference for measurement + reference images
-    ph_shift = phase.NStepPhaseShift(steps=phases)
+    # Make the experiment
+    ph_shift = phase.NStepPhaseShift(phase_count=len(imgs) / 2)
     ph_unwrap = phase.ReliabilityPhaseUnwrap()
-    calib = prof.PolynomialProf(name="polynomial1", degree=5)
-    experiment = FPExperiment(FakeCamera(imgs), FakeFringeProjector(), ph_shift, ph_unwrap, calib)
+    profil = prof.PolynomialProf()
 
-    def f(height): print(f"Height: {height} mm")
+    exp = Experiment("testexp", profil, ph_shift, ph_unwrap)
+    height_imgs = [exp.get_imgs(fake_camera, fake_proj) for _ in range(heights)]
 
-    experiment.on_height_measurement(f)
-    experiment.calibrate(heights)
+    # Add height callback
+    def on_h(height): print(f"Height: {height} mm")
+    exp.on_height_measurement(on_h)
 
-    # Save the calibration data
-    repo = FileProfRepo(storage_dir=Path(filedialog.askdirectory(title="Where to save calibrations to")))
-    ex_service = ExperimentService(repo)
-    ex_service.save_calib(calib)
+    # Run the calibration
+    exp.calibrate(height_imgs, np.linspace(0.0, 24.0, heights, dtype=np.float64))
 
-    print(f"Finished calibration")
+    # Save the calibration
+    ex_service.save_experiment(exp)
 
 @pytest.mark.skip(reason="Not ready")
-def test_experiment():
-    ex_service = ExperimentService(FileProfRepo(filedialog.askdirectory(title="What calibration directory to use?")))
-    prof = ex_service.load_calib(filedialog.askopenfilename(title="What calibration to use?"))
+def test_run_experiment():
+    exp_path = Path(filedialog.askdirectory(title="What experiment directory to use?"))
+    ex_service = ExperimentService(FileExperimentRepo(exp_path), FileImageRepo(exp_path))
 
-    # Declare paths for loading stuff
-    img_service = ImageService(FileImageRepo(filedialog.askdirectory(title="Where to load measurement images from:")))
+    imgs = ex_service.load_imgs("measurement_*") # Load the measurement images
+    imgs = np.mean(imgs, axis=3) # Convert to greyscale
 
-    # Load the measurement images
-    phase_count = 12
-    imgs = np.array([img_service.load_image(f"img{i}.jpg") for i in range(phase_count * 2)])
-    imgs = np.mean(imgs, axis=3)
- # Turn to greyscale
-    print("Finished loading measurement images")
+    # Make the mock devices
+    fake_camera = FakeCamera(np.mean(imgs, axis=3))
+    fake_proj = FakeFringeProjector()
 
-    # Calculate phasemap difference for measurement + reference images
-    camera = FakeCamera(imgs.tolist())
-    projector = FakeFringeProjector()
+    exp = ex_service.load_experiment("testexp")
 
-    ph_shift = phase.NStepPhaseShift(phase_count)
+    imgs = exp.get_imgs(fake_camera, fake_proj)
+    heightmap = exp.heightmap(imgs)
+
+    # TODO: View heightmap
+
+def test_save_experiment():
+    exp_path = Path(filedialog.askdirectory(title="What experiment directory to use?"))
+    ex_service = ExperimentService(FileExperimentRepo(exp_path), FileImageRepo(exp_path))
+
+    profil = prof.PolynomialProf(data=np.linspace(0.0, 10.0, 32))
+    ph_shift = phase.NStepPhaseShift(phase_count=5)
     ph_unwrap = phase.ReliabilityPhaseUnwrap()
 
-    heightmap = FPExperiment(camera, projector, ph_shift, ph_unwrap, prof).run()
+    print()
+    exp_name = input("What name to use for the experiment?\n")
+    experiment = Experiment(exp_name, profil, ph_shift, ph_unwrap)
 
-    # Show the result
-    show_heightmap(heightmap)
+    # Save the experiment
+    ex_service.save_experiment(experiment)
+
+def test_load_experiment():   
+    exp_path = Path(filedialog.askdirectory(title="What experiment directory to use?"))
+    ex_service = ExperimentService(FileExperimentRepo(exp_path), FileImageRepo(exp_path))
+
+    print()
+    print(ex_service.get_exp_list())
+
+    exp_name = input("What experiment do you want to load?\n")
+    exp = ex_service.load_experiment(exp_name)
+
+    print(exp)
+    print(exp.profil.data)

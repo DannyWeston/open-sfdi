@@ -1,10 +1,14 @@
-from opensfdi.video import Camera, FringeProjector
+import numpy as np
+
+from opensfdi.devices import Camera, FringeProjector
 
 class FakeCamera(Camera):
-    def __init__(self, imgs=[], consume=False):
+    def __init__(self, imgs:np.ndarray, circular=False):
         self.__imgs = imgs
 
-        self.__consume = consume
+        self.__index = 0
+
+        self.__circular = circular
 
     @property
     def resolution(self) -> tuple[int, int]:
@@ -15,14 +19,18 @@ class FakeCamera(Camera):
         return None
     
     def capture(self):
-        if len(self.__imgs) == 0: raise RuntimeError("There are no images left to use")
+        l = self.__imgs.shape[0]
 
-        next_img = self.__imgs.pop(0)
+        if 0 <= self.__index < l:
+            img = self.__imgs[self.__index]
+            self.__index += 1
+            return img
+        
+        elif self.__circular:
+            self.__index = 0 
 
-        # Re-add the image to the queue if consuming is disabled
-        if not self.__consume: self.__imgs.append(next_img)
+        raise RuntimeError("There are no images to use")
 
-        return next_img
 
 class FakeFringeProjector(FringeProjector):
     def __init__(self):

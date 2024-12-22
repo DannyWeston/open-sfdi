@@ -1,109 +1,89 @@
 import numpy as np
 
-from abc import ABC, abstractmethod
-from time import sleep
+from typing import Callable
 
 from opensfdi.phase import PhaseShift, PhaseUnwrap
 from opensfdi.profilometry import BaseProf
-from opensfdi.video import Camera, FringeProjector
+from opensfdi.devices import Camera, FringeProjector
 
+class Experiment:
+    def __init__(self, name: str, profil: BaseProf, ph_shift: PhaseShift, ph_wrap: PhaseUnwrap):
+        self.name = name
 
-class Experiment(ABC):
-    @abstractmethod
-    def __init__(self):
         self.streaming = False
-    
-        self.save_results = False
-    
-    @abstractmethod
-    def run(self):
-        pass
 
-    @abstractmethod
-    def calibrate(self):
-        pass
+        # Profilometry technique
+        self.profil = profil
+
+        # Phase-shift stuff
+        self.ph_shift = ph_shift
+        self.ph_unwrap = ph_wrap
+
+        self.__on_height_measurement_cbs = []
+        
+        self.__post_phasemap_cbs : list[Callable] = []
+
+    def calibrate(self, imgs, heights):
+        """ Calibrate the experiment using a set of imgs at corresponding heights """
+        # TODO: Implement debug logger
+
+        # Single channel array of phasemaps
+        ph, _, h, w, _ = imgs.shape
+        phasemaps = np.ndarray(shape=((ph, h, w)), dtype=np.float64)
+
+        for i, height in enumerate(heights):
+            self.call_on_height_measurement(height)
+
+            # Shift the captured images and unwrap them
+            phasemap = self.ph_shift.shift(imgs[i])
+            phasemap = self.ph_unwrap.unwrap(phasemap)
+            phasemaps[i] = phasemap
+
+            # Call post-phasemap cbs
+            self.call_post_phasemap_cbs()
+
+        # Run calibration
+        self.profil.calibrate(phasemaps, heights)
+
+    def get_imgs(self, camera: Camera, projector: FringeProjector):
+        """ Run the experiment to gather the needed images """
+
+        # TODO: Implement debug logger
+        w, h = camera.resolution
+        phase_count = self.ph_shift.phase_count
+        
+        imgs = np.ndarray(shape=((self.profil.phasemaps, phase_count, h, w, 3)), dtype=np.float64)
+        for i in range(self.profil.phasemaps):
+            imgs[i] = np.array([self.__fp_image(camera, projector, phase) for phase in self.ph_shift.get_phases()])
+
+        return imgs
+    
+    def heightmap(self, imgs):
+        """ Calculate a heightmap using passed imgs"""
+
+        # Single channel array of phasemaps
+        ph, _, h, w, _ = imgs.shape
+        phasemaps = np.ndarray(shape=((ph, h, w)), dtype=np.float64)
+
+        for i in range(self.profil.phasemaps):
+            # Shift the captured images and unwrap them
+            phasemap = self.ph_shift.shift(imgs[i])
+            phasemap = self.ph_unwrap.unwrap(phasemap)
+            phasemaps[i] = phasemap
+
+            # Call post-phasemap cbs
+            self.call_post_phasemap_cbs()
+
+        # Obtain heightmaps
+        return self.profil.heightmap(phasemaps)
 
     def stream(self):
         self.streaming = True
         
         while self.streaming:
-            yield self.run()
-
-class FPExperiment(Experiment):
-    def __init__(self, camera: Camera, projector: FringeProjector, ph_shift: PhaseShift, ph_wrap: PhaseUnwrap, calib: BaseProf, capture_delay = 0.0):
-        self.__camera = camera
-        self.__projector = projector
-
-        self.__ph_shift = ph_shift
-        self.__ph_unwrap = ph_wrap
-
-        self.__calib = calib
-
-        self.__capture_delay = capture_delay
-
-        self.__on_height_measurement_cbs = []
-
-    @property
-    def calibration(self):
-        return self.__calib
-
-    def __fp_image(self, phase):
-        # Get all the required images
-        self.__projector.phase = phase
-        self.__projector.display()
-
-        return self.__camera.capture()
-
-    def calibrate(self, heights):
-        """ Calibrate the experiment using a set of provided heights """
-        # TODO: Implement debug logger
-
-        phasemaps = []
-
-        # TODO: Implement debug logger
-        for height in heights:
-            self.call_on_height_measurement(height)
-
-            # Gather a sequence of imagess
-            imgs = np.array([self.__fp_image(phase) for phase in self.__ph_shift.get_phases()])
-
-            # Shift the captured images and unwrap them
-            phasemap = self.__ph_shift.shift(imgs)
-            phasemap = self.__ph_unwrap.unwrap(phasemap)
-            phasemaps.append(phasemap)
-
-            # Call post-phasemap cbs
-            self.__calib.call_post_cbs()
-
-            # Sleep for delay if needed
-            if 0 < self.__capture_delay: sleep(self.__capture_delay)
-
-        # Run calibration
-        self.__calib.calibrate(np.array(phasemaps), heights)
-    
-    def run(self):
-        """ Run the experiment to gather the needed images """
-
-        # TODO: Implement debug logger
-        phasemaps = []
-        for _ in range(self.__calib.meas_ph_needed):
-            # Gather a sequence of imagess
-            imgs = np.array([self.__fp_image(phase) for phase in self.__ph_shift.get_phases()])
+            imgs = self.get_imgs()
+            yield self.heightmap(imgs)
             
-            # # Shift the captured images and unwrap them
-            phasemap = self.__ph_shift.shift(imgs)
-            phasemap = self.__ph_unwrap.unwrap(phasemap)
-            phasemaps.append(phasemap)
-
-            # Call post-phasemap cbs
-            self.__calib.call_post_cbs()
-
-        if len(phasemaps) != self.__calib.meas_ph_needed:
-            raise Exception("Number of phasemaps generated does not match what the calibration requires")
-
-        # Obtain heightmaps
-        return self.__calib.heightmap(np.array(phasemaps))
-
     def on_height_measurement(self, cb):
         """ Add a custom callback after taking a measurement at a certain height
          
@@ -112,5 +92,30 @@ class FPExperiment(Experiment):
         """
         self.__on_height_measurement_cbs.append(cb)
 
+
+    # Callbacks
+
+    def add_post_phasemap_cbs(self, cb: Callable):
+        """ TODO: Add description """
+        self.__post_phasemap_cbs.append(cb)
+
+    def call_post_phasemap_cbs(self):
+        for cb in self.__post_phasemap_cbs: cb()
+
     def call_on_height_measurement(self, height):
         for cb in self.__on_height_measurement_cbs: cb(height)
+
+    # Private / dunder methods
+
+    def __fp_image(self, camera: Camera, projector: FringeProjector, phase: float):
+        projector.phase = phase
+        projector.display()
+
+        return camera.capture()
+
+    def __str__(self):
+        profil = type(self.profil)
+        ph_shift = type(self.ph_shift)
+        ph_unwrap = type(self.ph_unwrap)
+
+        return f"{self.name} \n({profil}) \n({ph_shift}) \n({ph_unwrap})"
