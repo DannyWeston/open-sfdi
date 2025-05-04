@@ -146,7 +146,7 @@ class CameraCalibration(Calibration):
         
         CHECKERBOARD = (self._cb_size[0] - 1, self._cb_size[1] - 1)
 
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        
 
         threedpoints = []
         twodpoints = []
@@ -163,6 +163,7 @@ class CameraCalibration(Calibration):
             if ret:
                 threedpoints.append(objectp3d)
 
+                criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
                 corners2 = cv2.cornerSubPix(grey_img, corners, (11, 11), (-1, -1), criteria)
 
                 twodpoints.append(corners2)

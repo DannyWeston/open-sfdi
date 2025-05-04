@@ -1,6 +1,7 @@
 # Custom paths to not include
 src/sfdi/data/*
 
+launch.json
 poetry.lock
 
 .vscode/
@@ -14,6 +15,8 @@ poetry.lock
 __pycache__/
 *.py[cod]
 *$py.class
+
+src/test/intensity_correction.py
 
 
 # C extensions

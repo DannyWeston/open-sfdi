@@ -4,8 +4,6 @@ import sys
 
 import numpy as np
 
-from matplotlib import pyplot as plt
-from contextlib import contextmanager
 
 # Redirect stdout to /dev/null
 @contextmanager
@@ -24,29 +22,6 @@ def stdout_redirected(to=os.devnull):
             yield
         finally:
             _redirect_stdout(to=old_stdout)
-
-
-def show_surface(data):
-    hf = plt.figure()
-
-    ha = hf.add_subplot(111, projection='3d')
-
-    X, Y = np.meshgrid(range(data.shape[1]), range(data.shape[0]))
-
-    ha.plot_surface(X, Y, data)
-
-    plt.show()
-
-
-def show_heightmap(heightmap, title='Heightmap'):
-    x, y = np.meshgrid(range(heightmap.shape[0]), range(heightmap.shape[1]))
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.plot_surface(x, y, np.transpose(heightmap))
-    plt.title(title)
-    plt.show()
-
 
 def centre_crop_img(img, x1, y1, x2:int = 0, y2:int = 0):
     if x2 == 0:

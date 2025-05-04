@@ -20,9 +20,6 @@ import numpy as np
 def AC(imgs: list):
     return (2 ** 0.5 / 3) * (((imgs[0] - imgs[1]) ** 2 + (imgs[1] - imgs[2]) ** 2 + (imgs[2] - imgs[0]) ** 2) ** 0.5)
 
-def DC(imgs: list):
-    return sum(imgs) / len(imgs)
-
 def mu_eff(mu_a, mu_tr, f):
     a = (2 * np.pi * f) ** 2
     return mu_tr * (3 * (mu_a / mu_tr) + a / mu_tr ** 2) ** 0.5

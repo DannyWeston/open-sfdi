@@ -1,145 +1,303 @@
 import numpy as np
-import pydantic
+import open3d as o3d
+import cv2
 
-from typing import Optional
 from abc import ABC, abstractmethod
 from numpy.polynomial import polynomial as P
+from matplotlib import pyplot as plt
 
-# Interfaces / Abstract classes
+from . import phase, image, devices
 
-class BaseProf(pydantic.BaseModel, ABC):
-    phasemaps: int = 2
-    needs_motor_stage: bool = True
+# Reconstruction classes
 
-    data: Optional[np.ndarray] = None
-
-    model_config = pydantic.ConfigDict(extra='allow', arbitrary_types_allowed=True)
+class ProfilRegistry:
+    _registry = {}
 
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
+    def register(cls, clazz):
+        cls._registry[clazz.__name__] = clazz
+        return clazz
 
     @classmethod
-    def validate(cls, v):
-        if not issubclass(v, BaseProf):
-            raise ValueError("Invalid Object")
+    def get_class(cls, name):
+        return cls._registry[name]
 
-        return v
-
+class IReconstructor(ABC):
     @abstractmethod
-    def calibrate(self, phasemaps, heights):
-        if (heights is None): raise TypeError
-
-        # Check passed number of heights equals number of img steps
-        if (ph_count := phasemaps.shape[0]) != (h_count := heights.shape[0]):
-            raise Exception(f"You must provide an equal number of heights to phasemaps ({ph_count} phasemaps, {h_count} heights given)")
-
-    @abstractmethod
-    def heightmap(self, phasemaps):
-        # TODO: None check for phasemaps
-
-        # Check passed number of heights equals number of img steps
-        if (li := phasemaps.shape[0]) != (lh := self.phasemaps):
-            raise Exception(f"Provided number of phase maps is incorrect ({li} passed, {lh} needed)")
-
-    def __str__(self):
-        ran = "Not calibrated" if self.data is None else "Calibrated"
-        return f"{type(self)} : {ran}"
-
-class ClassicProf(BaseProf):
-    """ 
-        Classic phase-height model
-
-        Note: Camera and Projector must both be perpendicular to reference plane
-
-        Extend this class and overload the calibrate / heightmap methods for your own functionality
-
-        Args:
-            name : Name (id-like) associated with the calibration
-            data : Calibration data required for heightmap reconstruction
-    """
-
-    def calibrate(self, phasemaps, heights):
+    def __init__(self):
         pass
 
-    def heightmap(self, phasemaps):
-        """ TODO: Complete documentation """
-        super().heightmap(phasemaps)
+    @abstractmethod
+    def reconstuct(self, phasemaps, **kwargs):
+        raise NotImplementedError
 
-        ref_phase = phasemaps[0]
-        meas_phase = phasemaps[1]
-
-        phase_diff = meas_phase - ref_phase
-
-        # h = 𝜙𝐷𝐸 ⋅ 𝑝 ⋅ 𝑑 / 𝜙𝐷𝐸 ⋅ 𝑝 + 2𝜋𝑙
-
-        a = phase_diff * self.data[0] * self.data[2]
-        b = phase_diff * self.data[0] + 2.0 * np.pi * self.data[1]
+class IPhaseHeightReconstructor(IReconstructor):
+    @abstractmethod
+    def __init__(self, camera: devices.Camera, projector: devices.Projector):
+        if not camera.is_calibrated():
+            raise Exception("You must use a calibrated camera for the stereo method")
         
-        self.data = a / b
+        if not projector.is_calibrated():
+            raise Exception("You must use a calibrated projector for the stereo method")
+
+        self.camera = camera
+        self.projector = projector
+
+class IStereoReconstructor(IReconstructor):
+    @abstractmethod
+    def __init__(self, camera: devices.Camera, projector: devices.Projector, vertical: bool):
+        if not camera.is_calibrated():
+            raise Exception("You must use a calibrated camera for the stereo method")
         
-        return self.data
+        if not projector.is_calibrated():
+            raise Exception("You must use a calibrated projector for the stereo method")
 
-class LinearInverseProf(BaseProf):
-    def calibrate(self, phasemaps, heights):
-        """
-            The linear inverse calibration model for fringe projection setups.
+        self.camera = camera
+        self.projector = projector
 
-            Note:   
-                - The moving plane must be parallel to the camera 
-                - The first phasemap is taken to be the reference phasemap
+        self._vertical = vertical
 
-                Δ𝜙(x, y) = h(x, y)Δ𝜙(x, y)a(x, y) + h(x, y)b(x, y)
-        """
+    @abstractmethod
+    def reconstruct(self, phasemap, stripe_pixels):
+        raise NotImplementedError
 
-        super().calibrate(phasemaps, heights)
+    def get_rotation(self):
+        return 0.0 if self._vertical else np.pi / 2.0
 
-        # Calculate phase difference maps at each height
-        # Phase difference between ref and h = 0 is zero
-        z, h, w = phasemaps.shape
-        ref_phase = phasemaps[0] # Assume reference phasemap is first entry
+@ProfilRegistry.register
+class PolynomialProfil(IPhaseHeightReconstructor):
+    def __init__(self, polydata):
+        self.polydata = polydata
 
-        ph_maps = np.empty(shape=(z, h, w))
-        ph_maps[0] = 0.0
-        ph_maps[1:] = phasemaps[1:] - ref_phase
+    def reconstruct(self, ref_phasemap, meas_phasemap):
+        # """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
 
-        # Least squares fit on a pixel-by-pixel basis to its height value (a, b)
-        self.data = np.empty(shape=(2, h, w), dtype=np.float64)
+        # raw_imgs = np.array([img.data for img in imgs])
+        # grey_imgs = np.array([cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in raw_imgs])
+        
+        # # Calculate a mask to use for segmentation
+        # dc_img = image.to_int8(image.dc_imgs(grey_imgs))
+        # ret, mask = cv2.threshold(dc_img, 16, 255, cv2.THRESH_BINARY)
+        # image.show_image(image.RawImage(dc_img))
 
-        # Δ𝜙(x, y) = h(x, y)Δ𝜙(x, y)a(x, y) + h(x, y)b(x, y)
+        # # Apply mask to imgs
+        # grey_imgs = [cv2.bitwise_and(img, img, mask=mask) for img in grey_imgs]
+        # # contours, hierarchy = cv2.findContours(image=thresh_img, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_NONE)
+        # # cv2.drawContours(image=image_copy, contours=contours, contourIdx=-1, color=(0, 255, 0), thickness=2, lineType=cv2.LINE_AA)
 
-        for y in range(h):
-            for x in range(w):
-                t = heights * ph_maps[:, y, x]
+        # # Make sure to check if horizontal or vertical ! (assumes horizontal by default)
+        # if unwrapper.phase_count == 1:
+        #     shifted = shifter.shift(grey_imgs)
+        # else:
+        #     l = shifter.phase_count
+        #     shifted = [shifter.shift(grey_imgs[i * l::l]) for i in range(unwrapper.phase_count)]
 
-                A = np.vstack([t, np.ones(len(t))]).T
-                m, c = np.linalg.lstsq(A, heights)[0]
+        # phasemap = unwrapper.unwrap(shifted)
+        # phase.show_phasemap(phasemap)    
 
-                self.data[0, y, x] = m
-                self.data[1, y, x] = c
+        print(self.polydata.shape)
 
-    def heightmap(self, phasemaps):
-        """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
-
-        super().heightmap(phasemaps)
-
-        # Obtain phase difference (reference phasemap should be first, measurement second)
-        phase_diff = phasemaps[1] - phasemaps[0]
+        # Obtain phase difference
+        phase_diff = meas_phasemap - ref_phasemap
 
         # Apply calibrated polynomial values to each pixel of the phase difference
         h, w = phase_diff.shape
-        self.data = np.empty_like(phase_diff)
+        heightmap = np.zeros_like(phase_diff)
 
         for y in range(h):
             for x in range(w):
-                self.data [y, x] = phase_diff[y, x] / (phase_diff[y, x] * self.data[0, y, x] + self.data[1, y, x])
+                heightmap[y, x] = P.polyval(phase_diff[y, x], self.polydata[:, y, x])
 
-        return self.data
+        return heightmap
 
-class PolynomialProf(BaseProf):
-    degree: Optional[int] = 5
+@ProfilRegistry.register
+class StereoProfil(IStereoReconstructor):
+    def __init__(self, camera: devices.Camera, projector: devices.Projector, vertical=True):
+        super().__init__(camera, projector, vertical)
 
-    def calibrate(self, phasemaps, heights):
+    def reconstruct(self, phasemap, num_stripes: float):
+        """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
+
+        # # Make sure to check if horizontal or vertical ! (assumes horizontal by default)
+        # if unwrapper.phase_count == 1:
+        #     shifted = shifter.shift(grey_imgs)
+        # else:
+        #     l = shifter.phase_count
+        #     shifted = [shifter.shift(grey_imgs[i * l::l]) for i in range(unwrapper.phase_count)]
+
+        c_height, c_width = self.camera.resolution
+        stripe_pixels = (c_width if self._vertical else c_height) / num_stripes
+
+        x_c, y_c = np.meshgrid(np.arange(c_width, dtype=np.float32), np.arange(c_height, dtype=np.float32))
+
+        x_p = (phasemap * stripe_pixels) / (2.0 * np.pi)
+
+        # Extract x_w, y_w, z_w from the solution
+        # Matrix equations are as following:
+        # P_c(0, 0) - u_c * P_c(2, 0)     P_c(0, 1) - u_c * P_c(2, 1)   P_c(0, 2) - u_c * P_c(2, 2)
+        # P_c(1, 0) - v_c * P_c(2, 0)     P_c(1, 1) - v_c * P_c(2, 1)   P_c(1, 2) - v_c * P_c(2, 2)
+        # P_p(0, 0) - u_p * P_p(2, 0)     P_p(0, 1) - u_p * P_p(2, 1)   P_p(0, 2) - u_p * P_p(2, 2)
+
+        P_c = self.camera.proj_mat
+        P_p = self.projector.proj_mat
+
+        A = np.empty((c_height, c_width, 3, 3))
+        b = np.empty((c_height, c_width, 3, 1))
+
+        # Method 1
+        # A[:, :, 0, 0] = P_c[0, 0] - (u_c * P_c[2, 0])
+        # A[:, :, 0, 1] = P_c[0, 1] - (u_c * P_c[2, 1])
+        # A[:, :, 0, 2] = P_c[0, 2] - (u_c * P_c[2, 2])
+
+        # A[:, :, 1, 0] = P_c[1, 0] - (v_c * P_c[2, 0])
+        # A[:, :, 1, 1] = P_c[1, 1] - (v_c * P_c[2, 1])
+        # A[:, :, 1, 2] = P_c[1, 2] - (v_c * P_c[2, 2])
+
+        # A[:, :, 2, 0] = P_p[1, 0] - (u_p * P_p[2, 0])
+        # A[:, :, 2, 1] = P_p[1, 1] - (u_p * P_p[2, 1])
+        # A[:, :, 2, 2] = P_c[1, 2] - (u_p * P_c[2, 2])
+
+        # b[:, :, 0, 0] = P_c[0, 3] - (u_c * P_c[2, 3])
+        # b[:, :, 1, 0] = P_c[1, 3] - (v_c * P_c[2, 3])
+        # b[:, :, 2, 0] = P_c[1, 3] - (u_p * P_c[2, 3])
+
+        # Method 2
+        A[:, :, 0, 0] = P_c[0, 0] - (x_c * P_c[2, 0])
+        A[:, :, 0, 1] = P_c[0, 1] - (x_c * P_c[2, 1])
+        A[:, :, 0, 2] = P_c[0, 2] - (x_c * P_c[2, 2])
+
+        A[:, :, 1, 0] = P_c[1, 0] - (y_c * P_c[2, 0])
+        A[:, :, 1, 1] = P_c[1, 1] - (y_c * P_c[2, 1])
+        A[:, :, 1, 2] = P_c[1, 2] - (y_c * P_c[2, 2])
+
+        A[:, :, 2, 0] = P_p[0, 0] - (x_p * P_p[2, 0])
+        A[:, :, 2, 1] = P_p[0, 1] - (x_p * P_p[2, 1])
+        A[:, :, 2, 2] = P_p[0, 2] - (x_p * P_p[2, 2])
+
+        b[:, :, 0, 0] = (x_c * P_c[2, 3]) - P_c[0, 3]
+        b[:, :, 1, 0] = (y_c * P_c[2, 3]) - P_c[1, 3]
+        b[:, :, 2, 0] = (x_p * P_p[2, 3]) - P_p[0, 3]
+
+        return np.squeeze(np.linalg.solve(A, b))
+
+# Calibration classes
+
+class FPCalibrator(ABC):
+    @abstractmethod
+    def __init__(self, camera: devices.Camera, projector: devices.Projector, phi_shifter: phase.PhaseShift, phi_unwrapper: phase.PhaseUnwrap):
+        self.camera = camera
+        self.projector = projector
+
+        self._window_size = (15, 15)
+        
+        # TODO: Allow for other calibration artefacts
+        self._cb_size = (7, 5)
+
+        self._phi_shifter = phi_shifter
+        self._phi_unwrapper = phi_unwrapper
+
+class StereoCalibrator(FPCalibrator):
+    def __init__(self, phi_shifter: phase.PhaseShift, phi_unwrapper: phase.PhaseUnwrap):
+        self.__window_size = (16, 16)
+        self.__cb_size = (7, 5)
+
+        self._phi_shifter = phi_shifter
+        self._phi_unwrapper = phi_unwrapper
+
+    def gather(self, camera: devices.Camera, projector: devices.Projector) -> tuple:
+        # TODO: Add some flag to save the images whilst gathering?
+        sfs = self._phi_unwrapper.get_fringe_count()
+        phases = self._phi_shifter.get_phases()
+
+        shifted = np.empty((len(sfs), *camera.shape), dtype=np.float32)
+
+        # Calculate the wrapped phase maps
+        for j, sf in enumerate(sfs):
+
+            imgs = devices.fringe_project(camera, projector, sf, phases)
+            shifted[j] = self._phi_shifter.shift(imgs)
+
+        # Calculate DC Images
+        dc_img = image.dc_imgs(imgs)
+
+        # Calculate unwrapped phase maps
+        phasemap = self._phi_unwrapper.unwrap(shifted, projector.rotation)
+
+        return dc_img, phasemap
+
+    def calibrate(self, camera: devices.Camera, projector: devices.Projector, num_imgs=15):
+        phasemaps = np.empty(shape=(num_imgs, *camera.shape), dtype=np.float32)
+        dc_imgs = np.empty_like(phasemaps)
+
+        fringe_count = self._phi_unwrapper.get_fringe_count()
+
+        for i in range(0, num_imgs, 2):
+            projector.rotation = True
+            dc_imgs[i], phasemaps[i] = self.gather(camera, projector)
+
+            projector.rotation = False
+            dc_imgs[i+1], phasemaps[i+1] = self.gather(camera, projector)
+        
+        return self.__calibrate(camera, projector, dc_imgs, phasemaps, fringe_count[-1])
+
+    def __calibrate(self, camera: devices.Camera, projector: devices.Projector, cb_imgs, phasemaps: np.ndarray, num_stripes) -> StereoProfil:
+        """ The triangular stereo calibration model for fringe projection setups. """
+
+        # Corner finding algorithm needs greyscale images
+        assert len(cb_imgs) == len(phasemaps)
+
+        world_xyz = []
+        corner_pixels = []
+        valid_phasemaps = []
+
+        h, w = self.__cb_size
+        cb_corners = np.zeros((h * w, 3), np.float32)
+        cb_corners[:, :2] = np.mgrid[:h, :w].T.reshape(-1, 2)
+
+        for i in range(0, len(cb_imgs), 2): # We can skip duplicate checkerboards as is bad practice
+            corners = image.find_corners(cb_imgs[i], self.__cb_size, self.__window_size)
+            corners2 = image.find_corners(cb_imgs[i+1], self.__cb_size, self.__window_size)
+
+            if corners is None:
+                print(f"Could not find checkerboard corners for image {i}")
+                continue
+
+            if corners2 is None:
+                print(f"Could not find checkerboard corners for image {i+1}")
+                continue
+
+            # DEBUG: Draw corners detected
+            # image.show_image(image.RawImage(cv2.drawChessboardCorners(cb_imgs[i], cb_size, corners, True)))
+
+            world_xyz.append(cb_corners)
+            corner_pixels.append(corners)
+            valid_phasemaps.append(phasemaps[i])
+
+            world_xyz.append(cb_corners)
+            corner_pixels.append(corners2)
+            valid_phasemaps.append(phasemaps[i+1])
+
+        # Finished phase manipulation, now just need to calibrate camera and projector
+        print(f"{len(valid_phasemaps)} total checkerboards identified")
+
+        E_c = camera.calibrate(world_xyz[::2], corner_pixels[::2]) # Can ignore repeated checkerboards for the camera case
+        print(f"Camera reprojection error: {E_c}")
+
+        E_p = projector.calibrate(world_xyz, corner_pixels, valid_phasemaps, num_stripes)        
+        print(f"Projector reprojection error: {E_p}")
+
+        return StereoProfil(camera, projector)
+
+class IPhaseHeightCalibrator(ABC):
+    @abstractmethod
+    def calibrate(self, phasemaps, heights) -> IPhaseHeightReconstructor:
+        raise NotImplementedError
+
+class PolynomialProfilCalibrator(IPhaseHeightCalibrator):
+    def __init__(self, degree=5):
+        self.degree = degree
+
+    def calibrate(self, phasemaps, heights) -> PolynomialProfil:
         """
             The polynomial calibration model for fringe projection setups.
 
@@ -147,12 +305,6 @@ class PolynomialProf(BaseProf):
                 - The moving plane must be parallel to the camera 
                 - The first phasemap is taken to be the reference phasemap
         """
-
-        super().calibrate(phasemaps, heights)
-
-        # Check polynomial degree is greater than zero
-        if self.degree < 1: raise ValueError("Degree of the polynomial must be greater than zero")
-
         # Calculate phase difference maps at each height
         # Phase difference between ref and h = 0 is zero
         _, h, w = phasemaps.shape
@@ -162,32 +314,41 @@ class PolynomialProf(BaseProf):
         ph_maps[1:] = phasemaps[1:] - phasemaps[0]  # Phase difference between baseline and height-increments
 
         # Polynomial fit on a pixel-by-pixel basis to its height value
-        self.data = np.empty(shape=(self.degree + 1, h, w), dtype=np.float64)
+        polydata = np.empty(shape=(self.degree + 1, h, w), dtype=np.float32)
 
         for y in range(h):
             for x in range(w):
-                self.data[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=self.degree)
+                polydata[:, y, x] = P.polyfit(ph_maps[:, y, x], heights, deg=self.degree)
 
-        return self.data
+        return PolynomialProfil(polydata)
 
-    def heightmap(self, phasemaps):
-        """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
-        super().heightmap(phasemaps)
+# Utility functions
 
-        # Obtain phase difference
-        ref_phase = phasemaps[0]
-        img_phase = phasemaps[1]
-        phase_diff = img_phase - ref_phase
+def show_surface(data):
+    hf = plt.figure()
 
-        # Apply calibrated polynomial values to each pixel of the phase difference
-        h, w = phase_diff.shape
-        heightmap = np.zeros_like(phase_diff)
+    ha = hf.add_subplot(111, projection='3d')
 
-        for y in range(h):
-            for x in range(w):
-                heightmap[y, x] = P.polyval(phase_diff[y, x], self.data[:, y, x])
+    X, Y = np.meshgrid(range(data.shape[1]), range(data.shape[0]))
 
-        return heightmap
+    ha.plot_surface(X, Y, data)
+
+    plt.show()
+
+def show_pointcloud(cloud: np.ndarray, colours=None, name='Point Cloud'):
+    # TODO: Something with title
+    if cloud.ndim != 3:
+        raise Exception("Need to pass a 3D array (width, height, xyz)")
+
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(cloud.reshape(-1, 3))
+
+    if not (colours is None):
+        pc.colors = o3d.utility.Vector3dVector(colours.reshape(-1, 3))
+
+    o3d.visualization.draw_geometries([pc])
+
+    o3d.io.write_point_cloud(f"{name}.ply", pc)
 
 # class ProfEnum(Enum):
 #     PhaseHeight = 1

@@ -1,67 +1,64 @@
 import pickle
 import cv2
-import numpy as np
 import re
-
-from PIL import Image
-from opensfdi.experiment import Experiment
+import json
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Generic, Iterator, TypeVar
+
+from .profilometry import IReconstructor
+from .image import FileImage, Image, to_f32
 
 # Repositories
 
-class IRepository(ABC):
+T = TypeVar('T')
+class IRepository(ABC, Generic[T]):
     @abstractmethod
-    def get(self, id):
-        pass
+    def get(self, id) -> T:
+        raise NotImplementedError
 
     @abstractmethod
-    def get_all(self):
-        pass
+    def get_by(self, regex, sorted: bool) -> Iterator[T]:
+        raise NotImplementedError
 
     @abstractmethod
-    def find(self, name) -> bool:
-        pass
+    def find(self, regex: str, sorted: bool) -> list[str]:
+        raise NotImplementedError
 
     @abstractmethod
-    def find_all(self) -> list[str]:
-        pass
+    def add(self, **kwargs) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def add(self, **kwargs):
-        pass
+    def delete(self, id) -> bool:
+        raise NotImplementedError
 
     @abstractmethod
-    def delete(self, id):
-        pass
-
-    @abstractmethod
-    def update(self, id, **kwargs):
-        pass
+    def update(self, id, **kwargs) -> bool:
+        raise NotImplementedError
 
 
 # File structure repository
 
-class BaseExperimentRepo(IRepository):
+class BaseExperimentRepo(IRepository[IReconstructor]):
+    def __init__(self, overwrite):
+        self.overwrite = overwrite
+
     @abstractmethod
-    def get(self, id: str) -> Experiment:
+    def get(self, id: str) -> IReconstructor:
         pass
 
     @abstractmethod
-    def get_all(self) -> list[Experiment]:
+    def get_by(self, regex, sorted) -> Iterator[IReconstructor]:
         pass
 
     @abstractmethod
-    def find(self, name: str) -> bool:
+    def find(self, regex: str, sorted) -> list[str]:
         pass
 
     @abstractmethod
-    def find_all(self) -> list[str]:
-        pass
-
-    @abstractmethod
-    def add(self, exp: Experiment) -> None:
+    def add(self, exp: IReconstructor) -> None:
         pass
 
     @abstractmethod
@@ -69,163 +66,172 @@ class BaseExperimentRepo(IRepository):
         pass
 
     @abstractmethod
-    def update(self, exp: Experiment) -> bool:
+    def update(self, exp: IReconstructor) -> bool:
         pass
 
 class FileExperimentRepo(BaseExperimentRepo):
-    file_extension = ".opensfdi"
-    storage_dir : Path
+    data_file = "data.bin"
+    manifest_file = "manifest.json"
 
-    def __init__(self, storage_dir : Path):
-        super().__init__()
+    def __init__(self, storage_dir: Path, overwrite=False):
+        super().__init__(overwrite)
 
         self.storage_dir = storage_dir
 
-    def get(self, id: str) -> Experiment:
-        location = self.storage_dir / f"{id}{self.file_extension}"
+    def __build_exp(self, name):
+        # Make the directory
+        folder = self.storage_dir / name
 
-        with open(location, "rb") as file:
-            profil = pickle.load(file)
-            ph_shift = pickle.load(file)
-            ph_unwrap = pickle.load(file)
+        with open(folder / self.manifest_file, "r") as json_file:
+            raw_json = json.load(json_file)
+            
+            data_file = raw_json["data"]
 
-        #return BaseProf.model_validate(raw_bin)
+            with open(folder / data_file, "rb") as file:
+                recon = pickle.load(file)
 
-        return Experiment(id, profil, ph_shift, ph_unwrap)
+        return recon
+
+    def get(self, name: str) -> IReconstructor:
+        found = self.find(name)
+
+        if len(found) < 1:
+            raise Exception(f"Experiment with name '{name}' does not exist")
+
+        return self.__build_exp(name)
     
-    def get_all(self) -> list[Experiment]:
-        # Match all files with correct file extension, then use standard getter
-        names = [file.stem for file in self.storage_dir.glob(f"*{self.file_extension}")]
-        return [self.get(name) for name in names]
+    def get_by(self, regex, sorted=False) -> Iterator[IReconstructor]:
+        # Match all files with correct file extension
+        yield from (self.__build_exp(fn) for fn in self.find(regex, sorted))
 
-    def find(self, name: str) -> bool:
-        location = self.storage_dir / f"{name}{self.file_extension}"
+    def find(self, regex: str, sorted=False) -> list[str]:
+        folders = [folder.stem for folder in self.storage_dir.glob("*/")]
+        
+        folders = list(filter(lambda name: re.match(regex, name), folders))
 
-        return location.exists()
+        if sorted: folders.sort()
 
-    def find_all(self) -> list[str]:
-        return [file.stem for file in self.storage_dir.glob(f"*{self.file_extension}")]
+        return folders
 
-    def add(self, exp: Experiment):
-        location = self.storage_dir / f"{exp.name}{self.file_extension}"
+    def add(self, recon: IReconstructor, name: str) -> None:
+        found = self.find(name)
 
-        with open(location, "wb") as file:
-            pickle.dump(exp.profil, file)
-            pickle.dump(exp.ph_shift, file)
-            pickle.dump(exp.ph_unwrap, file)
+        if 0 < len(found) and (not self.overwrite):
+            raise Exception(f"Experiment with name {name} already exists (overwriting disabled)")
+
+        # Make the directory
+        folder = (self.storage_dir / name)
+        folder.mkdir()
+
+        with open(folder / self.manifest_file, "w") as json_file:
+            data = dict()
+            data["name"] = name
+            data["data"] = self.data_file
+
+            json.dump(data, json_file)
+
+        with open(folder / self.data_file, "wb") as file:
+            pickle.dump(recon, file)
 
         # Should now be written !
 
     def delete(self, name: str) -> bool:
-        location = self.storage_dir / f"{name}{self.file_extension}"
-        try:
-            location.unlink()
+        found = self.find(name)
+
+        if 0 < len(found):
+            path:Path = self.storage_dir / found[0]
+            path.unlink()
             return True
 
-        except FileNotFoundError: 
-            return False
+        return False
 
-    def update(self, exp: Experiment) -> bool:
+    def update(self, exp: IReconstructor) -> bool:
         # TODO: Fix
         self.add(exp)
 
+
 # Image repositories
 
-class BaseImageRepo(IRepository):
+class BaseImageRepo(IRepository[Image]):
     @abstractmethod
-    def get(self, id: str) -> np.ndarray:
-        raise NotImplementedError
+    def __init__(self, overwrite: bool, greyscale=False):
+        self.overwrite = overwrite
+
+        self._greyscale = greyscale
 
     @abstractmethod
-    def add(self, img: np.ndarray, name: str) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def find(self, name: str) -> bool:
-        raise NotImplementedError
-
-    @abstractmethod
-    def find_all(self) -> set[str]:
+    def get(self, id: str) -> Image:
         raise NotImplementedError
     
-    # TODO: Implement
-
-    def get_all(self) -> set[np.ndarray]:
+    @abstractmethod
+    def get_by(self, regex, sorted) -> Iterator[Image]:
         pass
 
+    @abstractmethod
+    def add(self, img: Image, name: str) -> None:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def find(self, regex: str, sorted) -> list[str]:
+        raise NotImplementedError
+
+    @abstractmethod
     def delete(self, id) -> bool:
         pass
 
+    @abstractmethod
     def update(self, id, **kwargs) -> bool:
         pass
 
 class FileImageRepo(BaseImageRepo):
-    def __init__(self, storage_dir: Path, cache_size=1):
-        super().__init__()
+    def __init__(self, storage_dir: Path, file_ext='.tif', overwrite=False, greyscale=False):
+        super().__init__(overwrite=overwrite, greyscale=greyscale)
 
         self.storage_dir = storage_dir
+        self._file_ext = file_ext
 
-        self.cache_size = cache_size # Default to no caching
+    def __load_img(self, filename):
+        return FileImage(self.storage_dir / f"{filename}{self._file_ext}", self._greyscale)
 
-        self.img_cache = dict()
+    def add(self, img: Image, id: str):
+        ''' Save an image to a repository '''
 
-        self.file_extension = ".png"
+        found = self.find(id)
 
-    def add(self, img, id: str):
-        path = self.storage_dir / f"{id}{self.file_extension}"
+        if 0 < len(found) and (not self.overwrite):
+            raise FileExistsError(f"Image with id {found[0]} already exists")
 
-        if path.exists(): raise FileExistsError
+        path:Path = self.storage_dir / found[0]
 
-        # Write image directly if no cache
-        if self.cache_size == 1:
-            self.__write_img(path, img)
-            return
+        # Save as float32 to disk
+        cv2.imwrite(str(path.resolve()), cv2.cvtColor(to_f32(img), cv2.COLOR_RGB2BGR))
 
-        # Using caching, so check if img is already in cache
-        if id in self.img_cache: raise FileExistsError
+    def get(self, id: str) -> FileImage:
+        found = self.find(id)
 
-        self.img_cache[id] = img
+        if len(found) < 1:
+            raise FileNotFoundError(f"Could not find image with id '{id}'")
 
-        # Write cache if full
-        if self.cache_size <= len(self.img_cache):
-            for name, img in self.img_cache:
-                path = self.storage_dir / f"{name}{self.file_extension}"
-                self.__write_img(path, img)
-            
-            self.img_cache = dict()
+        return self.__load_img(found[0])
 
-    def __write_img(self, path: Path, img):
-        pil_img = Image.fromarray(img)
-        pil_img.save(str(path.resolve()), quality=100, subsampling=0)
+    def get_by(self, regex, sorted=False) -> Iterator[Image]:
+        yield from (self.__load_img(fn) for fn in self.find(regex, sorted))
 
-    def get(self, id: str) -> np.ndarray:
-        path = self.storage_dir / f"{id}{self.file_extension}"
+    def find(self, regex: str, sorted=False) -> list[str]:
+        filenames = [file.stem for file in self.storage_dir.glob(f"*{self._file_ext}")]
 
-        # If using cache, check if image is in the cache first before going to disk
-        if id in self.img_cache: return self.img_cache[path]
+        filenames = list(filter(lambda filename: re.match(regex, filename), filenames))
 
-        # Check if img is on disk
-        if not path.exists(): raise FileNotFoundError
+        if sorted: filenames.sort()
 
-        # Found on disk so load and return
-        return cv2.imread(str(path.resolve()), cv2.IMREAD_UNCHANGED)
+        return filenames
 
-    def find(self, name: str) -> bool:
-        # Check if in cache
-        if name in self.img_cache: return True
+    # NOT IMPLEMENTED
+    def delete(self, id) -> bool:
+        raise NotImplementedError
 
-        # Check if on disk
-        location = self.storage_dir / f"{name}{self.file_extension}"
-        return location.exists()
-
-    def find_all(self) -> set[str]:
-        # Get cached item ids
-        cached = set(self.img_cache.keys())
-
-        # Get items found on disk ids
-        on_disk = set([file.stem for file in self.storage_dir.glob(f"*{self.file_extension}")])
-
-        return cached.union(on_disk)
+    def update(self, id, **kwargs) -> bool:
+        raise NotImplementedError
 
 
 # Services
@@ -237,28 +243,34 @@ class ExperimentService:
         self._exp_repo = exp_repo
         self._img_repo = img_repo
 
-    def save_experiment(self, experiment: Experiment):
-        self._exp_repo.add(experiment)
+    def save_experiment(self, recon: IReconstructor, name: str):
+        try:
+            self._exp_repo.add(recon, name)
+        except FileExistsError:
+            return False
         
-        # Loop through images
+        # TODO: Loop through images
+        return True
 
-    def save_img(self, img, name):
-        self._img_repo.add(img, name)
+    def save_img(self, img, name) -> bool:
+        try:
+            self._img_repo.add(img, name)
+        except FileExistsError:
+            return False
+        
+        return True
 
-    def load_experiment(self, name) -> Experiment:
-        # TODO: Load images from disk if present
-
+    def load_experiment(self, name) -> IReconstructor:
         return self._exp_repo.get(name)
 
-    def load_imgs(self, regex) -> list[np.ndarray]:
-        # Filter all available images using regex
-        filtered = [name for name in self._img_repo.find_all() if re.match(regex, name)]
+    def load_img(self, name) -> Image:
+        return self._img_repo.get(name)
 
-        # Load the images using their filtered names
-        return [self._img_repo.get(name) for name in filtered]
-    
+    def get_by(self, regex, sorted=False) -> Iterator[Image]:
+        yield from self._img_repo.get_by(regex, sorted)
+
     def get_exp_list(self):
-        return self._exp_repo.find_all()
-    
+        return self._exp_repo.find(".*")
+
     def exp_exists(self, name):
-        return self._exp_repo.find(name)
+        return self._exp_repo.find(f"{name}+$") == 1
