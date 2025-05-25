@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from abc import ABC
 
-
 class Image(ABC):
     def __init__(self, data: np.ndarray):
         self._raw_data = data
@@ -19,7 +18,7 @@ class FileImage(Image):
     def __init__(self, path: Path, greyscale=False):
         super().__init__(None)
 
-        self._path = path
+        self._path: Path = path
 
         self.__greyscale = greyscale
 
@@ -28,12 +27,19 @@ class FileImage(Image):
         # Check if the data needs to be loaded
         if self._raw_data is None:
             self._raw_data = cv2.imread(str(self._path.resolve()), cv2.IMREAD_COLOR)
-            self._raw_data = self._raw_data.astype(np.float32) / 255.0
+            self._raw_data = self._raw_data.astype(np.float32) / 255.0 # Default to float32
 
-            if self.__greyscale: self._raw_data = to_grey(self._raw_data)
+        # Change to greyscale if needed
+        if self.__greyscale: 
+            self._raw_data = to_grey(self._raw_data)
 
-        # Default to float32
-        return super().raw_data
+        return self._raw_data
+
+    def __str__(self):
+        return f"{self._path.absolute()}"
+
+def undistort_img(img_data, intrinsic_mat, dist_mat):
+    return cv2.undistort(img_data, intrinsic_mat, dist_mat, None, intrinsic_mat)  
 
 def to_grey(img_data: np.ndarray) -> np.ndarray:
     if img_data.ndim == 2: return img_data
@@ -49,10 +55,10 @@ def to_f32(img_data) -> np.ndarray:
     if img_data.dtype == np.float32:
         return img_data
 
-    if img_data.dtype != int:
-        raise Exception(f"Image must be in integer format (found {img_data.dtype})")
-
-    return img_data.astype(np.float32) / 255.0
+    if img_data.dtype == int or img_data.dtype == cv2.CV_8U or img_data.dtype == np.uint8:
+        return img_data.astype(np.float32) / 255.0
+    
+    raise Exception(f"Image must be in integer format (found {img_data.dtype})")
 
 def to_int8(img_data) -> np.ndarray:
     if img_data.dtype == np.uint8:
@@ -63,24 +69,53 @@ def to_int8(img_data) -> np.ndarray:
     
     return (img_data * 255.0).astype(np.uint8)
 
-def find_corners(img, cb_size, window_size):
-    cb_algo_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_FAST_CHECK + cv2.CALIB_CB_NORMALIZE_IMAGE
-    # cb_algo_flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_EXHAUSTIVE
+def flip_colours(img_data):
+    if img_data.ndim != 3:
+        return img_data
+    
+    return cv2.cvtColor(img_data, cv2.COLOR_BGR2RGB)
 
+def find_corners(img, cb_size):
     uint_img = to_int8(img)
-    result, corners = cv2.findChessboardCorners(uint_img, cb_size, flags=cb_algo_flags)
 
-    if not result: return None
+    # flags = cv2.CALIB_CB_EXHAUSTIVE
+    # result, corners = cv2.findChessboardCornersSB(uint_img, cb_size, flags=flags)
+    # if not result: return None
 
-    # Refine pixels identified to subpixels
+    flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_EXHAUSTIVE
+    result, corners = cv2.findChessboardCorners(uint_img, cb_size, flags=flags)
+
+    if not result:
+        return None
+
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    corners = cv2.cornerSubPix(uint_img, corners, (15, 15), (-1, -1), criteria)
 
-    corner_subpixels = cv2.cornerSubPix(uint_img, corners, window_size, (-1, -1), criteria)
-    return np.squeeze(corner_subpixels)
+    return corners.squeeze()
+
+def threshold_mask(img, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
+    success, result = cv2.threshold(img, threshold, max, type)
+
+    if not success:
+        return None
+    
+    return result
+
+def calc_modulation(imgs, phases):
+    N = len(phases)
+
+    a = np.zeros_like(imgs[0])
+    b = np.zeros_like(a)
+
+    for i, phase in enumerate(phases):
+        a += np.square(imgs[i] * np.sin(phase))
+        b += np.square(imgs[i] * np.cos(phase))
+
+    return (2.0 / N) * np.sqrt(a + b)
 
 def dc_imgs(imgs) -> np.ndarray:
     """ Calculate average intensity across supplied imgs (return uint8 format)"""
-    return np.sum(np.array(imgs), axis=0) / len(imgs)
+    return np.sum(imgs, axis=0, dtype=np.float32) / len(imgs)
 
 def calc_vignetting(img: np.ndarray, expected_max=None):
     if expected_max is None:
@@ -91,10 +126,19 @@ def calc_vignetting(img: np.ndarray, expected_max=None):
     return ideal_img - img
 
 def calc_gamma(img: np.ndarray):
-    if img.ndim == 3:
-        return np.mean(img)
-        
-    return np.mean(img)
+    kernel = (9, 16) # 9 pixels tall, 16 wide
+
+    h = int(img.shape[0] / 2)
+    h1 = h - kernel[0]
+    h2 = h + kernel[0]
+
+    w = int(img.shape[1] / 2)
+    w1 = w - kernel[1]
+    w2 = w + kernel[1]
+
+    roi = img[h1:h2, w1:w2]
+
+    return np.mean(roi)
 
 def show_image(img, name='Image', size=None, wait=0):
     if size is None: size = img.shape[1::-1]
@@ -109,6 +153,9 @@ def show_image(img, name='Image', size=None, wait=0):
 def show_scatter(xss, yss):
     fig = plt.figure()
     ax1 = fig.add_subplot()
+
+    ax1.set_xlim(0.0, 1.01)
+    ax1.set_ylim(0.0, 1.01)
 
     N = len(xss)
     colors = np.linspace(0.0, 1.0, N)

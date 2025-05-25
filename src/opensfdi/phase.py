@@ -42,36 +42,26 @@ class MultiFreqPhaseUnwrap(PhaseUnwrap):
     def __init__(self, fringe_count):
         super().__init__(fringe_count)
 
-    def unwrap(self, phasemaps, vertical=True):
+    def unwrap(self, phasemaps):
         total = len(phasemaps)
 
         if total < 2:
             raise Exception("You must pass at least two spatial frquencies to use ")
 
-        # First phasemap is already unwrapped by definition
-        unwrapped = np.empty_like(phasemaps)
-
         fringe_counts = self.get_fringe_count()
 
-        h, w = phasemaps[0].shape
-        fringe_freqs = np.array(fringe_counts) / (w if vertical else h)
-
+        # First phasemap is already unwrapped by definition
         # Lowest frequency phasemap has absolute frequency
-        unwrapped[0] = unwrap_phase(phasemaps[0])
+        unwrapped = phasemaps[0].copy()
 
         for i in range(1, total):
-            phi = phasemaps[i]
+            ratio = fringe_counts[i] / fringe_counts[i-1]
 
-            estimate = (fringe_freqs[i] / fringe_freqs[i-1]) * unwrapped[i-1]
+            k = np.round(((unwrapped * ratio) - phasemaps[i]) / (2.0 * np.pi))
 
-            # Calculate fringe order
-            fringe_order = np.round((estimate - phi) / (2.0 * np.pi))
+            unwrapped = phasemaps[i] + (2.0 * np.pi * k)
 
-            # Accumulate phases
-            unwrapped[i] = phi + (fringe_order * 2.0 * np.pi)
-
-        return unwrapped[-1]
-
+        return unwrapped
 
 # Phase Shifting
 
@@ -96,6 +86,9 @@ class PhaseShift(ABC):
     def phase_count(self, value):
         self.__phase_count = value
 
+    def get_phases(self):
+        return np.linspace(0, 2.0 * np.pi, self.phase_count, endpoint=False)
+
 class NStepPhaseShift(PhaseShift):
     def __init__(self, phase_count=3):
         super().__init__(phase_count)
@@ -103,25 +96,35 @@ class NStepPhaseShift(PhaseShift):
         if phase_count < 3:
             raise Exception("The N-step method requires 3 or more phases")
 
-    def shift(self, imgs) -> np.ndarray:
-        a = np.zeros(shape=imgs[0].shape, dtype=np.float32)
+    def shift(self, imgs, mask=0.0) -> np.ndarray:
+        a = np.zeros_like(imgs[0])
         b = np.zeros_like(a)
 
         phases = self.get_phases()
-
+        N = len(imgs)
+        
         # Check number of passed images is expected
-        assert self.phase_count == len(imgs)
+        assert self.phase_count == N
 
         for i, phase in enumerate(phases):
             a += imgs[i] * np.sin(phase)
             b += imgs[i] * np.cos(phase)
 
-        return np.arctan2(a, b)
+        result = np.arctan2(a, b)
+        result[result < 0] += 2.0 * np.pi # Correct arctan2 function
 
-    def get_phases(self):
-        return np.linspace(0, 2.0 * np.pi, self.phase_count, endpoint=False)
+        # Threshold for mask to ignore dark areas as they are unreliable
+        if 0.0 < mask: 
+            mod = (2.0 / N) * np.sqrt(a ** 2 + b ** 2)
+            float_mask = image.threshold_mask(mod, threshold=mask)
+            float_mask[float_mask == 0.0] = np.nan # Set to nans
+
+            result *= float_mask
+
+        return result
     
 def show_phasemap(phasemap, name='Phasemap'):
-    norm_data = cv2.normalize(phasemap, None, 0.0, 1.0, cv2.NORM_MINMAX)
+    # Mark nans as black
 
-    image.show_image(norm_data, name)
+    norm = cv2.normalize(phasemap, None, 0.0, 1.0, cv2.NORM_MINMAX)
+    image.show_image(norm, name)

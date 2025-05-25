@@ -1,72 +1,65 @@
 import tkinter as tk
 import numpy as np
 import pytest
+import matplotlib.pyplot as plt
 
 from pathlib import Path
 from tkinter import filedialog
 
-from opensfdi import profilometry, phase
-from opensfdi.fringe_projection import FringeProjection
-from opensfdi.services import ExperimentService, FileExperimentRepo, FileImageRepo
+from opensfdi import profilometry, phase, image, devices, pointcloud
+from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo
 
-from .video import FakeCamera, FakeProjector
-from opensfdi import image
+from .video import FakeProjector
 
 # Initialise tkinter for file browsing
 # TODO: Change this to use paths etc
 root = tk.Tk()
 root.wm_attributes('-topmost', 1)
 root.withdraw()
-repo_path = Path(filedialog.askdirectory(title="What directory for repo to use?"))
-ex_service = ExperimentService(FileExperimentRepo(repo_path), FileImageRepo(repo_path, greyscale=True))
 print("")
 
-reconst = None
-
 @pytest.mark.skip(reason="Not ready")
-def test_pointcloud():
-  profilometry.show_pointcloud(np.random.random((100, 100, 3)), 'Test')
+def test_phase():
+  shifts = 12
+  stripe_counts = np.array([1.0, 8.0, 64.0])
+  N = shifts * len(stripe_counts)
 
+  exp_path = Path(filedialog.askdirectory(title="Where is the folder for the experiment?"))
+  img_repo = FileImageRepo(exp_path / "images", file_ext='.tif', greyscale=True)
 
-@pytest.mark.skip(reason="Not ready")
-def test_calibration():
-  # Instantiate classes for calibration
-  # Load the images to use in the calibration process
+  camera = devices.FileCamera(resolution=(1080, 1920), channels=1,
+    imgs=[img_repo.get("calibration" + str(i+1).zfill(5)) for i in range(N)])
 
-  #imgs = list(ex_service.get_by("calibration*", sorted=True))
-  global ex_service
-  imgs = list(ex_service.get_by(f"calibration", sorted=True))
-  # imgs = list(ex_service.load_img(f"calibration{str(i).zfill(5)}") for i in range(1800))
-
-  camera = FakeCamera(imgs, resolution=(1080, 1920), channels=1)
   projector = FakeProjector(resolution=(1080, 1920))
 
-  phase_count = 8
-  phases = [1.0, 15.0, 180.0]
-  num_imgs = 36
+  shifter = phase.NStepPhaseShift(shifts)
+  unwrapper = phase.MultiFreqPhaseUnwrap(stripe_counts)
+  
+  calibrator = profilometry.StereoCalibrator(cb_size=(10, 7), square_width=0.018, shift_mask=0.1)
+  phasemap = calibrator.gather_phasemap(camera, projector, shifter, unwrapper)
 
-  calib = profilometry.StereoCalibrator(
-    phase.NStepPhaseShift(phase_count),
-    phase.MultiFreqPhaseUnwrap(phases)
-  )
+@pytest.mark.skip(reason="Not ready")
+def test_cv2camera():
+  # camera = devices.CV2Camera(0, resolution=(720, 1280), channels=1)
 
-  assert len(imgs) == len(phases) * phase_count * num_imgs
-  print(f"{len(imgs)} images loaded")
+  # camera.show_feed()
 
-  global reconst
-  reconst = calib.calibrate(camera, projector, num_imgs)
+  devices_path = Path(filedialog.askdirectory(title="What directory for loading devices?"))
+  cam_repo = FileCameraRepo(devices_path, overwrite=True)
 
-  ex_service.save_experiment(reconst, "experiment1")
+  camera = cam_repo.get("camera1")
 
-  print("Calibration finished")
+  camera.show_feed()
 
-  # Undistort images
-  # Determine whether to use black areas or not - alpha = % of filled-in pixels for undistorted image
-  # self.optimal_mat, roi = cv2.getOptimalNewCameraMatrix(self.cam_mat, self.dist_mat, (w, h), 1, (w, h))
+@pytest.mark.skip(reason="Not ready")
+def test_projector():
 
-  # # Save the calibration
-  # ex_service.save_experiment(exp)
+  projector = devices.DisplayProjector()
 
+  devices_path = Path(filedialog.askdirectory(title="What directory for loading devices?"))
+  proj_repo = FileProjectorRepo(devices_path, overwrite=True)
+
+  proj_repo.add(projector, "projector1")
 
 @pytest.mark.skip(reason="Not ready")
 def test_gamma():
@@ -78,7 +71,6 @@ def test_gamma():
 
   image.show_scatter([expected_gammas], [measured_gammas])
 
-
 @pytest.mark.skip(reason="Not ready")
 def test_vignette():
   global ex_service
@@ -89,23 +81,113 @@ def test_vignette():
   image.show_image(diff, "Vignetting amount")
   image.show_image(img + diff, "Vignetting fixed")
 
+@pytest.mark.skip(reason="Not ready")
+def test_curve():
+  global ex_service
+  imgs = list(ex_service.get_by("intensity", sorted=True))
+
+  h, w = imgs[0].raw_data.shape
+
+  d = 25
+
+  h1 = int(h / 2) - d
+  h2 = h1 + 2 * d
+
+  w1 = int(w / 2)
+  w2 = w1 + 2 * d
+
+  intensities = [np.mean(img.raw_data[h1:h2, w1:w2]) for img in imgs]
+  wattages = np.linspace(30.0, 36.625, len(imgs), endpoint=True)
+
+  plt.ylim(0.0, 1.01)
+  plt.scatter(wattages, intensities, c='r')
+  plt.show()
+
+  found = next((v for (i, v) in enumerate(wattages[:-1]) if (intensities[i] == intensities[i+1] == 1.0)), None)
+
+  if not found:
+    print("No max intensity was found given the range of wattages")
+    return True
+  
+  print(f"Max intensity wattage: {found}")
+
+# @pytest.mark.skip(reason="Not ready")
+def test_calibration():
+  # Instantiate classes for calibration
+  # Load the images to use in the calibration process
+
+  # imgs = list(ex_service.get_by("calibration*", sorted=True))
+  
+  # TODO: Fix devices folder creation
+  img_path = Path(filedialog.askdirectory(title="Where is the folder for the calibration images?"))
+  img_repo = FileImageRepo(img_path, file_ext='.tif', greyscale=True)
+
+  camera = devices.FileCamera(resolution=(480, 640), channels=1,
+    imgs=list(img_repo.get_by(f"calibration", sorted=True)))
+
+  projector = FakeProjector(resolution=(1080, 1920))
+
+  # Fringe projection & calibration parameters
+  cb_size = (10, 7)
+  shift_mask = 0.01
+  phase_count = 12
+  fringe_counts = [1.0, 8.0, 64.0]
+  orientations = 19
+  square_size = 0.018
+
+  assert len(camera.imgs) == (len(fringe_counts) * phase_count * orientations * 2) + orientations
+
+  shifter = phase.NStepPhaseShift(phase_count)
+  unwrapper = phase.MultiFreqPhaseUnwrap(fringe_counts)
+  
+  calibrator = profilometry.StereoCalibrator(cb_size, square_size, shift_mask)
+  calibrator.calibrate(camera, projector, shifter, unwrapper, num_imgs=orientations)
+
+  # Save the experiment information and the calibrated camera / projector
+  device_path = Path(filedialog.askdirectory(title="Where should the device calibration results be saved to?"))
+  cam_repo = FileCameraRepo(device_path, overwrite=True)
+  proj_repo = FileProjectorRepo(device_path, overwrite=True)
+
+  cam_repo.add(camera, "camera")
+  proj_repo.add(projector, "projector")
 
 @pytest.mark.skip(reason="Not ready")
 def test_measurement():
-  # Load the images to use in the calibration process
-  global ex_service
-  imgs = list(ex_service.get_by(f"measurement", sorted=True))
+  # Setup repositories
+  img_path = Path(filedialog.askdirectory(title="Where is the folder for the measurement images?"))
+  img_repo = FileImageRepo(img_path, file_ext='.tif', greyscale=True)
+ 
+  # Fringe projection settings
+  phase_count = 12
+  fringe_counts = [1.0, 8.0, 64.0]
+  total_imgs = phase_count * len(fringe_counts)
 
-  #unwrapper = phase.TemporalPhaseUnwrap(phase_count=3, spatial_freqs=[1.0, 16.0, 64.0])
+  # Load projector and camera with imgs
+  calib_path = Path(filedialog.askdirectory(title="Where is the folder for the optical devices?"))
+  cam_repo = FileCameraRepo(calib_path / "devices", overwrite=True)
+  proj_repo = FileProjectorRepo(calib_path / "devices", overwrite=True)
 
-  reconst = ex_service.load_experiment("experiment1")
+  projector: FakeProjector = proj_repo.get("projector1")
 
-  # fringe_proj = FringeProjection(
-  #   phase.NStepPhaseShift(phase_count=8),
-  #   phase.MultiFreqPhaseUnwrap(np.array([1.0, 15.0, 180.0]))
-  # )
+  camera: devices.FileCamera = cam_repo.get("camera1")
+  camera.imgs = list(img_repo.get("measurement" + f"{i}".zfill(5)) for i in range(total_imgs))
 
-  camera = FakeCamera(imgs, resolution=(1080, 1920))
-  projector = FakeProjector(resolution=(1080, 1920))
+  # Phase related stuff
+  shifter = phase.NStepPhaseShift(phase_count)
+  unwrapper = phase.MultiFreqPhaseUnwrap(fringe_counts)
 
-  reconst.reconstuct(imgs)
+  reconstructor = profilometry.StereoProfil(shift_mask=0.01)
+  pc, _ = reconstructor.reconstruct(camera, projector, shifter, unwrapper, fringe_counts[-1])
+
+  # Apply an offset to the pointcloud by checkerboard coordinates
+  # TODO: Properly implement
+  offset_x, offset_y = profilometry.checkerboard_centre((11, 8), 0.018)
+  pc.translate([-offset_x, -offset_y, 0.0])
+  pc = pointcloud.rotate_pointcloud(pc, np.pi / 2.0, 0.0, np.pi)
+  # pc[:, 2] -= 0.499666666
+
+  # From Blender coords to open3d, export stl with:
+  # Up: Y
+  # Forward: -Z
+
+  pointcloud.save_cloud(pc, Path(f"sphere3840x2160.ply"))
