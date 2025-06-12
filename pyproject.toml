@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "opensfdi"
-version = "0.1.0"
+version = "0.1.9"
 description = ""
 authors = ["Daniel Weston <psydw2@nottingham.ac.uk>"]
 readme = "README.md"

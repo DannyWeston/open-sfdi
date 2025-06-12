@@ -67,8 +67,10 @@ class MultiFreqPhaseUnwrap(PhaseUnwrap):
 
 class PhaseShift(ABC):
     @abstractmethod
-    def __init__(self, phase_count):
+    def __init__(self, phase_count, shift_mask=0.01):
         self.__phase_count = phase_count
+
+        self._shift_mask = shift_mask
 
     @abstractmethod
     def get_phases(self) -> np.ndarray:
@@ -90,13 +92,13 @@ class PhaseShift(ABC):
         return np.linspace(0, 2.0 * np.pi, self.phase_count, endpoint=False)
 
 class NStepPhaseShift(PhaseShift):
-    def __init__(self, phase_count=3):
-        super().__init__(phase_count)
+    def __init__(self, phase_count=3, shift_mask=0.0):
+        super().__init__(phase_count, shift_mask=shift_mask)
 
         if phase_count < 3:
             raise Exception("The N-step method requires 3 or more phases")
 
-    def shift(self, imgs, mask=0.0) -> np.ndarray:
+    def shift(self, imgs) -> np.ndarray:
         a = np.zeros_like(imgs[0])
         b = np.zeros_like(a)
 
@@ -113,16 +115,15 @@ class NStepPhaseShift(PhaseShift):
         result = np.arctan2(a, b)
         result[result < 0] += 2.0 * np.pi # Correct arctan2 function
 
-        # Threshold for mask to ignore dark areas as they are unreliable
-        if 0.0 < mask: 
+        if 0.0 < self._shift_mask:
             mod = (2.0 / N) * np.sqrt(a ** 2 + b ** 2)
-            float_mask = image.threshold_mask(mod, threshold=mask)
+            float_mask = image.threshold_mask(mod, threshold=self._shift_mask)
             float_mask[float_mask == 0.0] = np.nan # Set to nans
 
             result *= float_mask
 
         return result
-    
+
 def show_phasemap(phasemap, name='Phasemap'):
     # Mark nans as black
 

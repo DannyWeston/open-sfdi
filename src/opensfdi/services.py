@@ -3,6 +3,7 @@ import cv2
 import re
 import json
 import numpy as np
+import struct
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -10,6 +11,22 @@ from typing import Generic, Iterator, TypeVar
 
 from . import devices, profilometry
 from .image import FileImage, Image, to_f32
+
+# Misc
+
+def save_pointcloud(filename: Path, arr: np.ndarray):
+  with open(filename, "wb") as file:
+    file.write(bytes('ply\n', 'utf-8'))
+    file.write(bytes('format binary_little_endian 1.0\n', 'utf-8'))
+    file.write(bytes(f'element vertex {arr.shape[0]}\n', 'utf-8'))
+    file.write(bytes(f'property float x\n', 'utf-8'))
+    file.write(bytes(f'property float y\n', 'utf-8'))
+    file.write(bytes(f'property float z\n', 'utf-8'))
+    file.write(bytes(f'end_header\n', 'utf-8'))
+
+    for i in range(arr.shape[0]):
+      file.write(bytearray(struct.pack("fff", arr[i, 0], arr[i, 1], arr[i, 2])))
+
 
 # Repositories
 
@@ -115,16 +132,17 @@ class FileCameraRepo(BaseCameraRepo):
         with open(self.__storage_dir / f"{id}.json", "w") as json_file:
             data = {
                 "camera_type"   : camera.__class__.__name__,
-                "is_calibrated"    : camera.is_calibrated(),
+                "calibrated"    : camera.calibrated,
                 "resolution"    : list(camera.resolution),
                 "channels"      : camera.channels
             }
 
-            if camera.is_calibrated():
-                data["proj_mat"] = camera.proj_mat.tolist(),
-                data["dist_mat"] = camera.dist_mat.tolist(),
-                data["intrinsic_mat"] = camera.intrinsic_mat.tolist(),
-                data["reproj_error"] = camera.reproj_error,
+            if camera.calibrated:
+                data["K"]               = camera.K.tolist(),
+                data["R"]               = camera.R.tolist(),
+                data["t"]               = camera.t.tolist(),
+                data["dist_mat"]        = camera.dist_mat.tolist(),
+                data["reproj_error"]    = camera.reproj_error,
 
             # Save any cv2 device stream
             if isinstance(camera, devices.CV2Camera):
@@ -149,15 +167,18 @@ class FileCameraRepo(BaseCameraRepo):
         if clazz is None: return None
 
         camera: devices.Camera = clazz(resolution=tuple(raw_json["resolution"]), channels=1)
+        camera.calibrated           = raw_json["calibrated"]
 
         if isinstance(camera, devices.CV2Camera):
             camera.device = raw_json["cv2_device"]
 
-        if raw_json["is_calibrated"]:
-            camera.proj_mat = np.array(raw_json["proj_mat"]).reshape((3, 4))
-            camera.dist_mat = np.array(raw_json["dist_mat"])
-            camera.intrinsic_mat = np.array(raw_json["intrinsic_mat"]).reshape((3, 3))
+        if raw_json["calibrated"]:
+            camera.K            = np.array(raw_json["K"]).reshape((3, 3))
+            camera.R            = np.array(raw_json["R"]).reshape((3, 3))
+            camera.t            = np.array(raw_json["t"]).reshape((3, 1))
+            camera.dist_mat     = np.array(raw_json["dist_mat"])
             camera.reproj_error = raw_json["reproj_error"]
+            
 
         return camera
 
@@ -236,16 +257,17 @@ class FileProjectorRepo(BaseProjectorRepo):
         with open(self.__storage_dir / f"{id}.json", "w") as json_file:
             data = {
                 "projector_type"   : projector.__class__.__name__,
-                "is_calibrated"    : projector.is_calibrated(),
+                "calibrated"    : projector.calibrated,
                 "resolution"    : list(projector.resolution),
                 "channels"      : projector.channels
             }
 
-            if projector.is_calibrated():
-                data["proj_mat"] = projector.proj_mat.tolist(),
-                data["dist_mat"] = projector.dist_mat.tolist(),
-                data["intrinsic_mat"] = projector.intrinsic_mat.tolist(),
-                data["reproj_error"] = projector.reproj_error,
+            if projector.calibrated:
+                data["K"]               = projector.K.tolist(),
+                data["R"]               = projector.R.tolist(),
+                data["t"]               = projector.t.tolist(),
+                data["dist_mat"]        = projector.dist_mat.tolist(),
+                data["reproj_error"]    = projector.reproj_error,
 
             # Save any cv2 device stream
             if isinstance(projector, devices.DisplayProjector):
@@ -270,13 +292,14 @@ class FileProjectorRepo(BaseProjectorRepo):
         if not clazz: return None
 
         projector: devices.Projector = clazz(resolution=tuple(raw_json["resolution"]), channels=1)
+        projector.calibrated           = raw_json["calibrated"]
 
-        if raw_json["is_calibrated"]:
-            projector.proj_mat = np.array(raw_json["proj_mat"]).reshape((3, 4))
-            projector.dist_mat = np.array(raw_json["dist_mat"])
-            projector.intrinsic_mat = np.array(raw_json["intrinsic_mat"]).reshape((3, 3))
-
-            projector.reproj_error = raw_json["reproj_error"]
+        if raw_json["calibrated"]:
+            projector.K             = np.array(raw_json["K"]).reshape((3, 3))
+            projector.R             = np.array(raw_json["R"]).reshape((3, 3))
+            projector.t             = np.array(raw_json["t"]).reshape((3, 1))
+            projector.dist_mat      = np.array(raw_json["dist_mat"])
+            projector.reproj_error  = raw_json["reproj_error"]
 
         return projector
 
@@ -397,18 +420,18 @@ class FileExperimentRepo(BaseExperimentRepo):
 
 class BaseImageRepo(IRepository[Image]):
     @abstractmethod
-    def __init__(self, overwrite: bool, greyscale=True):
+    def __init__(self, overwrite: bool, channels=1):
         self.overwrite = overwrite
 
-        self.__greyscale = greyscale
+        self.__channels = channels
 
     @property
-    def greyscale(self):
-        return self.__greyscale
+    def channels(self):
+        return self.__channels
     
-    @greyscale.setter
-    def greyscale(self, value):
-        self.__greyscale = value
+    @channels.setter
+    def channels(self, value):
+        self.__channels = value
 
     @abstractmethod
     def get(self, id: str) -> Image:
@@ -435,14 +458,14 @@ class BaseImageRepo(IRepository[Image]):
         pass
 
 class FileImageRepo(BaseImageRepo):
-    def __init__(self, storage_dir: Path, file_ext='.tif', overwrite=False, greyscale=True):
-        super().__init__(overwrite=overwrite, greyscale=greyscale)
+    def __init__(self, storage_dir: Path, file_ext='.tif', overwrite=False, channels=1):
+        super().__init__(overwrite=overwrite, channels=channels)
 
         self.storage_dir = storage_dir
         self._file_ext = file_ext
 
     def __load_img(self, filename):
-        return FileImage(self.storage_dir / f"{filename}{self._file_ext}", greyscale=self.greyscale)
+        return FileImage(self.storage_dir / f"{filename}{self._file_ext}", channels=self.channels)
 
     def add(self, img: Image, id: str):
         ''' Save an image to a repository '''
@@ -508,7 +531,7 @@ class ExperimentService:
         
         return True
 
-    def save_img(self, img, name) -> bool:
+    def save_img(self, img, name, experiment) -> bool:
         try:
             self._img_repo.add(img, name)
         except FileExistsError:

@@ -6,10 +6,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tkinter import filedialog
 
-from opensfdi import profilometry, phase, image, devices, pointcloud
-from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo
-
-from .video import FakeProjector
+from opensfdi import profilometry, phase, image, devices
+from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo, save_pointcloud
 
 # Initialise tkinter for file browsing
 # TODO: Change this to use paths etc
@@ -30,7 +28,7 @@ def test_phase():
   camera = devices.FileCamera(resolution=(1080, 1920), channels=1,
     imgs=[img_repo.get("calibration" + str(i+1).zfill(5)) for i in range(N)])
 
-  projector = FakeProjector(resolution=(1080, 1920))
+  projector = devices.FakeProjector(resolution=(1080, 1920))
 
   shifter = phase.NStepPhaseShift(shifts)
   unwrapper = phase.MultiFreqPhaseUnwrap(stripe_counts)
@@ -111,7 +109,7 @@ def test_curve():
   
   print(f"Max intensity wattage: {found}")
 
-# @pytest.mark.skip(reason="Not ready")
+@pytest.mark.skip(reason="Not ready")
 def test_calibration():
   # Instantiate classes for calibration
   # Load the images to use in the calibration process
@@ -120,27 +118,24 @@ def test_calibration():
   
   # TODO: Fix devices folder creation
   img_path = Path(filedialog.askdirectory(title="Where is the folder for the calibration images?"))
-  img_repo = FileImageRepo(img_path, file_ext='.tif', greyscale=True)
-
-  camera = devices.FileCamera(resolution=(480, 640), channels=1,
-    imgs=list(img_repo.get_by(f"calibration", sorted=True)))
-
-  projector = FakeProjector(resolution=(1080, 1920))
+  img_repo = FileImageRepo(img_path, file_ext='.tif')
 
   # Fringe projection & calibration parameters
-  cb_size = (10, 7)
-  shift_mask = 0.01
-  phase_count = 12
+  shift_mask = 0.03
+  phase_count = 8
   fringe_counts = [1.0, 8.0, 64.0]
-  orientations = 19
-  square_size = 0.018
+  orientations = 20
 
-  assert len(camera.imgs) == (len(fringe_counts) * phase_count * orientations * 2) + orientations
+  N = len(fringe_counts) * phase_count * orientations * 2
 
-  shifter = phase.NStepPhaseShift(phase_count)
+  camera = devices.FileCamera(resolution=(1080, 1920), channels=1, imgs=list(img_repo.get_by("calibration", sorted=True)))
+  projector = devices.FakeProjector(resolution=(1140, 912))
+  calib_board = devices.CircleBoard(circle_spacing=0.03, poi_count=(4, 13), inverted=True, staggered=True)
+
+  shifter = phase.NStepPhaseShift(phase_count, shift_mask=shift_mask)
   unwrapper = phase.MultiFreqPhaseUnwrap(fringe_counts)
   
-  calibrator = profilometry.StereoCalibrator(cb_size, square_size, shift_mask)
+  calibrator = profilometry.StereoCalibrator(calib_board)
   calibrator.calibrate(camera, projector, shifter, unwrapper, num_imgs=orientations)
 
   # Save the experiment information and the calibrated camera / projector
@@ -151,43 +146,65 @@ def test_calibration():
   cam_repo.add(camera, "camera")
   proj_repo.add(projector, "projector")
 
-@pytest.mark.skip(reason="Not ready")
+# @pytest.mark.skip(reason="Not ready")
 def test_measurement():
-  # Setup repositories
-  img_path = Path(filedialog.askdirectory(title="Where is the folder for the measurement images?"))
-  img_repo = FileImageRepo(img_path, file_ext='.tif', greyscale=True)
- 
   # Fringe projection settings
-  phase_count = 12
-  fringe_counts = [1.0, 8.0, 64.0]
-  total_imgs = phase_count * len(fringe_counts)
+  cb_size     = (4, 13)
+  square_size = 0.03
+  shift_mask  = 0.0
+  phase_count = 8
+  num_stripes = [1.0, 8.0, 64.0]
+
+  objects = [
+    "Hand",
+    # "Icosphere",
+    # "UVSphere",
+    # "Monkey",
+    # "Cube",
+    # "Beet"
+  ]
 
   # Load projector and camera with imgs
   calib_path = Path(filedialog.askdirectory(title="Where is the folder for the optical devices?"))
-  cam_repo = FileCameraRepo(calib_path / "devices", overwrite=True)
-  proj_repo = FileProjectorRepo(calib_path / "devices", overwrite=True)
+  
+  cam_repo = FileCameraRepo(calib_path, overwrite=True)
+  camera: devices.FileCamera = cam_repo.get("camera")
+  img_path = calib_path / "measurement"
+  img_repo = FileImageRepo(img_path, file_ext='.tif', channels=camera.channels)
 
-  projector: FakeProjector = proj_repo.get("projector1")
-
-  camera: devices.FileCamera = cam_repo.get("camera1")
-  camera.imgs = list(img_repo.get("measurement" + f"{i}".zfill(5)) for i in range(total_imgs))
+  proj_repo = FileProjectorRepo(calib_path, overwrite=True)
+  projector: devices.FakeProjector = proj_repo.get("projector")
 
   # Phase related stuff
-  shifter = phase.NStepPhaseShift(phase_count)
-  unwrapper = phase.MultiFreqPhaseUnwrap(fringe_counts)
+  shifter = phase.NStepPhaseShift(phase_count, shift_mask=shift_mask)
+  unwrapper = phase.MultiFreqPhaseUnwrap(num_stripes)
+  reconstructor = profilometry.StereoProfil()
 
-  reconstructor = profilometry.StereoProfil(shift_mask=0.01)
-  pc, _ = reconstructor.reconstruct(camera, projector, shifter, unwrapper, fringe_counts[-1])
+  for obj in objects:
+    camera.imgs = list(img_repo.get_by(f"{obj}_", sorted=True))
 
-  # Apply an offset to the pointcloud by checkerboard coordinates
-  # TODO: Properly implement
-  offset_x, offset_y = profilometry.checkerboard_centre((11, 8), 0.018)
-  pc.translate([-offset_x, -offset_y, 0.0])
-  pc = pointcloud.rotate_pointcloud(pc, np.pi / 2.0, 0.0, np.pi)
-  # pc[:, 2] -= 0.499666666
+    pc, _ = reconstructor.reconstruct(camera, projector, shifter, unwrapper, num_stripes[-1])
 
-  # From Blender coords to open3d, export stl with:
+    # Positioned at camera coordinate frame origin (0, 0, 0)
+    # offset_x, offset_y = profilometry.checkerboard_centre(cb_size, square_size)
+    # pc[:, 0] -= offset_x
+    # pc[:, 1] -= offset_y
+
+    # Rotate by 90 degrees to align with OpenGL coordinate frame
+    r_x = (np.pi / 2.0) #+ ((15.0 / 180.0) * np.pi)
+    R_x = np.array([[1, 0, 0], [0, np.cos(r_x), -np.sin(r_x)], [0, np.sin(r_x), np.cos(r_x)]])
+    # pc = (R_x @ pc.T).T
+
+    save_pointcloud(img_path / f"{obj}.ply", pc)
+
+    import open3d as o3d
+    pcd_load = o3d.io.read_point_cloud(img_path / f"{obj}.ply")
+    o3d.visualization.draw_geometries([pcd_load])
+
+  # TODO: Consider rotation, save as .ply
+   
+  #pc = pointcloud.rotate_pointcloud(pc, np.pi / 2.0, 0.0, np.pi)
+
+  # From Blender coords to export stl with:
   # Up: Y
   # Forward: -Z
-
-  pointcloud.save_cloud(pc, Path(f"sphere3840x2160.ply"))

@@ -1,3 +1,4 @@
+from typing import Iterator
 import numpy as np
 import cv2
 
@@ -26,16 +27,18 @@ class CameraRegistry:
 class Camera(ABC):
     @abstractmethod
     def __init__(self, resolution=(720, 1280), channels=1, apply_undistort=True):
-        self.__proj_mat = None
-        self.__dist_mat = None
-        self.reproj_error = None
-
-        self.__apply_undistort = apply_undistort
-
-        self.intrinsic_mat: np.ndarray = None
-
         self.__channels = channels
         self.__resolution = resolution
+        self.__apply_undistort = apply_undistort
+
+        self.calibrated = False
+
+        self.K: np.ndarray = None
+        self.R = None
+        self.t = None
+
+        self.__dist_mat = None
+        self.reproj_error = None
 
     @property
     def dist_mat(self) -> np.ndarray:
@@ -46,12 +49,12 @@ class Camera(ABC):
         self.__dist_mat = value
 
     @property
-    def proj_mat(self) -> np.ndarray:
-        return self.__proj_mat
+    def ext_mat(self):
+        return np.concatenate([self.R, self.t], axis=1)
 
-    @proj_mat.setter
-    def proj_mat(self, value):
-        self.__proj_mat = value
+    @property
+    def proj_mat(self) -> np.ndarray:
+        return np.dot(self.K, self.ext_mat)
 
     @property
     def channels(self) -> int:
@@ -86,42 +89,46 @@ class Camera(ABC):
     def apply_undistort(self, value):
         self.__apply_undistort = value
 
-    def is_calibrated(self) -> bool:
-        return not (self.proj_mat is None)
-
     def calibrate(self, world_xyz, corner_pixels):
         h, w = self.resolution
 
-        self.reproj_error, self.intrinsic_mat, self.__dist_mat, R, t = cv2.calibrateCamera(world_xyz, 
-            corner_pixels, (w, h), None, None)
+        flags = cv2.CALIB_FIX_K3 + cv2.CALIB_USE_INTRINSIC_GUESS
+
+        # Optical centre in the middle, focal length in pixels equal to resolution
+        K_guess = np.array([
+            [w,     0.0,    w / 2],
+            [0.0,   h,      h / 2],
+            [0.0,   0.0,    1.0]
+        ])
+
+        self.reproj_error, self.K, self.__dist_mat, R, t = cv2.calibrateCamera(world_xyz, 
+            corner_pixels, (w, h), K_guess, None, flags=flags)
 
         # errors = []
         # for i in range(len(world_xyz)):
         #     imgpoints_reproj, _ = cv2.projectPoints(
         #         world_xyz[i], R[i], t[i], self.intrinsic_mat, self.__dist_mat
         #     )
-        #     error = cv2.norm(corner_pixels[i], imgpoints_reproj, cv2.NORM_L2) / len(imgpoints_reproj)
+        #     error = cv2.norm(corner_pixels[i], imgpoints_reproj.reshape(-1, 2), cv2.NORM_L2) / len(imgpoints_reproj)
         #     errors.append(error)
 
         # # Convert to NumPy array for plotting
         # errors = np.array(errors)
 
-        R, _  = cv2.Rodrigues(R[0])
-        t = t[0]
-
-        # Calculate camera projection matrix (use first entry, could use any)
-        self.proj_mat = self.intrinsic_mat @ np.hstack((R, t.reshape(3, 1)))
+        self.calibrated = True
+        self.R, _  = cv2.Rodrigues(R[0])
+        self.t = t[0]
 
         return self.reproj_error
 
     def undistort(self, img):
         # Can't undistort if camera is not calibrated
-        if not self.is_calibrated():
+        if not self.calibrated:
             return img
 
         # Optional: New camera matrix (use original K_cam to preserve resolution)
 
-        return image.undistort_img(img, self.intrinsic_mat, self.dist_mat)
+        return image.undistort_img(img, self.K, self.dist_mat)
 
     @abstractmethod
     def capture(self) -> image.Image:
@@ -249,17 +256,23 @@ class ProjectorRegistry:
 class Projector(ABC):
     @abstractmethod
     def __init__(self, resolution=(720, 1280), channels=1):
-        self.__proj_mat = None
-        self.__dist_mat = None
-        self.intrinsic_mat = None
-
-        self.reproj_error = None
-
         self.__resolution = resolution
         self.__channels = channels
         self.__rotation = 0.0
         self.__phase = 0.0
         self.__spatial_freq = 8.0
+
+        self.proj_coords = None
+
+        self.calibrated = False
+
+        # Intrinsic / rotation / translation
+        self.K: np.ndarray = None
+        self.R: np.ndarray = None
+        self.t: np.ndarray = None
+
+        self.__dist_mat = None
+        self.reproj_error = None
 
     @property
     def dist_mat(self) -> np.ndarray:
@@ -270,12 +283,12 @@ class Projector(ABC):
         self.__dist_mat = value
 
     @property
+    def extr_mat(self):
+        return np.concatenate([self.R, self.t], axis=1)
+
+    @property
     def proj_mat(self) -> np.ndarray:
-        return self.__proj_mat
-    
-    @proj_mat.setter
-    def proj_mat(self, value):
-        self.__proj_mat = value
+        return np.dot(self.K, self.extr_mat)
 
     @property
     def frequency(self) -> float:
@@ -323,46 +336,71 @@ class Projector(ABC):
     def channels(self, value):
         self.__channels = value
 
+    def _phase_match(self, corners, phi_v, phi_h, num_stripes):
+        N = corners.shape[0]
+        proPoints = np.empty((N, 2), dtype=np.float32)
+        
+        for i in range(N):
+            x, y = corners[i]
+
+            pRowUp = int(y)
+            pRowLow = pRowUp + 1
+            pColLeft = int(x)
+            pColRight = pColLeft + 1
+            rowRatio = y - pRowUp
+            colRatio = x - pColLeft
+
+            phaseVA = phi_v[pRowUp, pColLeft]
+            phaseVB = phi_v[pRowUp, pColRight]
+            phaseVC = phi_v[pRowLow, pColLeft]
+            phaseVD = phi_v[pRowLow, pColRight]
+            phaseVP = (1 - rowRatio) * ((1 - colRatio) * phaseVA + colRatio * phaseVB) + rowRatio * ((1 - colRatio) * phaseVC + colRatio * phaseVD)
+
+            proCol = phaseVP / np.pi / (2.0 * num_stripes)
+            proPoints[i, 0] = proCol
+
+            phaseHA = phi_h[pRowUp, pColLeft]
+            phaseHB = phi_h[pRowUp, pColRight]
+            phaseHC = phi_h[pRowLow, pColLeft]
+            phaseHD = phi_h[pRowLow, pColRight]
+            phaseHP = (1 - rowRatio) * ((1 - colRatio) * phaseHA + colRatio * phaseHB) + rowRatio * ((1 - colRatio) * phaseHC + colRatio * phaseHD)
+
+            proRow = phaseHP / np.pi / (2.0 * num_stripes)
+            proPoints[i, 1] = proRow
+
+        return proPoints
+
     def calibrate(self, world_xyz, corner_subpixels, phasemaps, num_stripes):
-        # DEPRECATED: Convert camera corner pixels to ints for indexing
-        # Use bilinear interp as better accuracy
-        corner_pixels = np.round(corner_subpixels).astype(int)
-
-        # For the detected checkerboard corners, these are subpixel coordinates
-        # Use bilinear interp to convert to subpixel coordinates for the phase values
-        # np.nanmean() is used because the phasemap may contain nans for any filtered values
-
         h, w = self.resolution
 
-        proj_coords = np.empty_like(corner_subpixels, dtype=np.float32)
+        self.proj_coords = np.empty_like(corner_subpixels, dtype=np.float32)
 
         # Loop through each set of calibration board corner points
-        for cb_i in range(len(world_xyz)):            
-            corner_xs = corner_pixels[cb_i, :, 0] # Vertical corner pixels
-            corner_ys = corner_pixels[cb_i, :, 1]
+        for cb_i in range(len(world_xyz)):
+            self.proj_coords[cb_i] = self._phase_match(corner_subpixels[cb_i], 
+                phasemaps[2*cb_i], phasemaps[2*cb_i+1], num_stripes)
 
-            phi_v = phasemaps[2*cb_i]    # Vertical fringesphasemaps
-            phi_h = phasemaps[2*cb_i+1]  # Horizontal fringe phasemaps
+        # Optical centre in the middle, focal length in pixels equal to resolution
+        K_guess = np.array([
+            [1.2 * w,   0.0,        w / 2],
+            [0.0,       1.2*0.8*h,  h / 2],
+            [0.0,       0.0,        1.0]
+        ])
 
-            # Convert camera coordinates to projector coordinates
-            # "act as the projector's eye"
-            x_p = (phi_v[corner_ys, corner_xs] * w) / (2.0 * np.pi * num_stripes)
-            y_p = (phi_h[corner_ys, corner_xs] * h) / (2.0 * np.pi * num_stripes)
+        flags = 0
+        flags |= cv2.CALIB_FIX_K3
+        flags |= cv2.CALIB_USE_INTRINSIC_GUESS
 
-            proj_coords[cb_i] = np.dstack((x_p, y_p))
+        self.reproj_error, self.K, self.__dist_mat, R, t = cv2.calibrateCamera(world_xyz, self.proj_coords, (w, h), 
+            K_guess, None, flags=flags)
+        
+        # Calculate projector intrinsic matrix
+        self.R, _  = cv2.Rodrigues(R[0])
+        self.t = t[0]
 
-        self.reproj_error, self.intrinsic_mat, self.__dist_mat, R, t = cv2.calibrateCamera(world_xyz, proj_coords, (w, h), None, None)
-
-        R, _  = cv2.Rodrigues(R[0])
-        t = t[0]
-
-        # Calculate camera projection matrix (use first entry, could use any)
-        self.proj_mat = self.intrinsic_mat @ np.hstack((R, t.reshape(3, 1)))
+        self.calibrated = True
 
         return self.reproj_error
-
-    def is_calibrated(self) -> bool:
-        return not (self.proj_mat is None)
 
     @abstractmethod
     def display(self):
@@ -396,7 +434,118 @@ class DisplayProjector(Projector):
         # Do something to display stuff on a screen
         pass
 
+@ProjectorRegistry.register
+class FakeProjector(Projector):
+    def __init__(self, resolution=(1080, 1920), channels=1):
+        super().__init__(resolution=resolution, channels=channels)
+
+    def display(self):
+        # Do nothing
+        pass
 # TODO: Add FileProjector, could be useful in the future
+
+
+# CalibrationBoard
+
+class CalibrationBoard(ABC):
+    @abstractmethod
+    def __init__(self):
+        raise NotImplementedError
+    
+    @abstractmethod
+    def find_pois(self, img: np.ndarray):
+        raise NotImplementedError
+    
+    def get_poi_coords(self):
+        raise NotImplementedError
+
+class Checkerboard(CalibrationBoard):
+    def __init__(self, square_width=0.018, poi_count=(10, 7)):
+        self.__poi_count = poi_count
+        self.__square_width = square_width
+
+        # Multiply by square width
+        w, h = self.__poi_count
+        self.__cb_corners = np.zeros((w * h, 3), np.float32)
+        self.__cb_corners[:, :2] = np.mgrid[:w, :h].T.reshape(-1, 2) * self.__square_width
+
+    def find_pois(self, img: np.ndarray):
+        # Change image to int if not already
+        uint_img = image.to_int8(img)
+
+        # flags = cv2.CALIB_CB_EXHAUSTIVE
+        # result, corners = cv2.findChessboardCornersSB(uint_img, cb_size, flags=flags)
+        # if not result: return None
+
+        flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_EXHAUSTIVE
+        result, corners = cv2.findChessboardCorners(uint_img, self.__poi_count, flags=flags)
+
+        if not result: return None
+
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        corners = cv2.cornerSubPix(uint_img, corners, (15, 15), (-1, -1), criteria)
+
+        return corners.squeeze()
+
+    def get_poi_coords(self):
+        return self.__cb_corners.copy()
+
+class CircleBoard(CalibrationBoard):
+    def __init__(self, circle_diameter=1.0, circle_spacing=1.0, poi_count=(10, 7), inverted=True, staggered=True):
+        self.__poi_count = poi_count
+        self.__diameter = circle_diameter
+        self.__spacing = circle_spacing
+
+        self.__staggered = staggered
+
+        # Setup blob detector
+        self.__detector_params = cv2.SimpleBlobDetector_Params()
+        self.__detector_params.filterByArea = True
+        self.__detector_params.maxArea = 10000
+        self.__detector_params.minArea = 500
+
+        self.__detector_params.blobColor = 255 if inverted else 0
+
+        # Multiply by square width
+        w, h = self.__poi_count
+
+        # Setup checkerboard world coordinates
+        if self.__staggered:
+            self.__circle_centres = np.zeros((w * h, 3), dtype=np.float32)
+            for i in range(h):
+                    for j in range(w):
+                        self.__circle_centres[i * w + j, :2] = [(2 * j + i % 2) * self.__spacing / 2, i * self.__spacing / 2]
+        else:
+            self.__circle_centres = np.zeros((w * h, 3), np.float32)
+            self.__circle_centres[:, :2] = np.mgrid[:w, :h].T.reshape(-1, 2) * self.__spacing
+
+    def find_pois(self, img: np.ndarray):
+        # Mask the image
+        img = image.threshold_mask(img, threshold=0.1)
+
+        # Convert image to uint datatype
+        uint_img = image.to_int8(img)
+
+        # Create a detector with the parameters
+        detector = cv2.SimpleBlobDetector_create(self.__detector_params)
+
+        flags = (cv2.CALIB_CB_ASYMMETRIC_GRID if self.__staggered else cv2.CALIB_CB_SYMMETRIC_GRID)
+
+        result, corners = cv2.findCirclesGrid(uint_img, self.__poi_count, blobDetector=detector, flags=flags)
+
+        if not result: return None
+
+        # DEBUG: Show the corners on the image
+        # corners_img = cv2.drawChessboardCorners(uint_img, self.__poi_count, corners, result)
+        # image.show_image(corners_img)
+
+        # criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+        # corners = cv2.cornerSubPix(uint_img, corners, (15, 15), (-1, -1), criteria)
+
+        return corners.squeeze()
+
+    def get_poi_coords(self):
+        return self.__circle_centres.copy()
 
 def fringe_project(camera: Camera, projector: Projector, sf, phases) -> np.ndarray:
     projector.frequency = sf

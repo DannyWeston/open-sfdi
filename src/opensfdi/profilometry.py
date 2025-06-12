@@ -1,5 +1,5 @@
+import cv2
 import numpy as np
-import open3d as o3d
 import time
 
 
@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from numpy.polynomial import polynomial as P
 from matplotlib import pyplot as plt
 
-from . import phase, image, devices, pointcloud
+from . import phase, image, devices
 
 # Reconstruction classes
 
@@ -67,14 +67,14 @@ class PhaseHeightReconstructor(IReconstructor):
 
 class StereoReconstructor(IReconstructor):
     @abstractmethod
-    def __init__(self, shift_mask):
-        self._shift_mask = shift_mask
-
+    def __init__(self):
+        raise NotImplementedError
+    
     def reconstruct(self, camera: devices.Camera, projector: devices.Projector, phi_shift: phase.PhaseShift, phi_unwrap: phase.PhaseUnwrap, num_stripes):
-        if not camera.is_calibrated():
+        if not camera.calibrated:
             raise Exception("You must use a calibrated camera for reconstruction")
         
-        if not projector.is_calibrated():
+        if not projector.calibrated:
             raise Exception("You must use a calibrated projector for reconstruction")
         
         return None
@@ -89,7 +89,7 @@ class StereoReconstructor(IReconstructor):
         # Calculate the wrapped phase maps
         for j, sf in enumerate(sfs):
             imgs = devices.fringe_project(camera, projector, sf, phases)
-            shifted[j] = phi_shift.shift(imgs, self._shift_mask)
+            shifted[j] = phi_shift.shift(imgs)
 
         # Calculate unwrapped phase maps
         return phi_unwrap.unwrap(shifted)
@@ -142,26 +142,35 @@ class PolynomialProfil(PhaseHeightReconstructor):
 
 @ProfilRegistry.register
 class StereoProfil(StereoReconstructor):
-    def __init__(self, shift_mask):
-        super().__init__(shift_mask)
+    def __init__(self):
+        pass
 
-    def reconstruct(self, camera: devices.Camera, projector: devices.Projector, phi_shift: phase.PhaseShift, phi_unwrap: phase.PhaseUnwrap, num_stripes):
-        """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
+    def _points1(self, P_c, P_p, x_c, y_c, x_p):
+        a1 = P_c[0, 0] - x_c * P_c[2, 0]
+        a2 = P_c[0, 1] - x_c * P_c[2, 1]
+        a3 = P_c[0, 2] - x_c * P_c[2, 2]
+        a4 = P_c[1, 0] - y_c * P_c[2, 0]
+        a5 = P_c[1, 1] - y_c * P_c[2, 1]
+        a6 = P_c[1, 2] - y_c * P_c[2, 2]
+        a7 = P_p[0, 0] - x_p * P_p[2, 0]
+        a8 = P_p[0, 1] - x_p * P_p[2, 1]
+        a9 = P_p[0, 2] - x_p * P_p[2, 2]
 
-        super().reconstruct(camera, projector, phi_unwrap, phi_shift, num_stripes)
+        b1 = x_c * P_c[2, 3] - P_c[0, 3]
+        b2 = y_c * P_c[2, 3] - P_c[1, 3]
+        b3 = x_p * P_p[2, 3] - P_p[0, 3]
 
-        # Gather a phasemap by using the camera and projector
-        phasemap = self._gather_phasemap(camera, projector, phi_unwrap, phi_shift)
+        D = -a3 * a5 * a7 + a2 * a6 * a7 + a3 * a4 * a8 - a1 * a6 * a8 - a2 * a4 * a9 + a1 * a5 * a9
+        x_w = (1. / D) * ((a5 * a9 - a6 * a8) * b1 + (a3 * a8 - a2 * a9) * b2 + (a2 * a6 - a3 * a5) * b3)
+        y_w = (1. / D) * ((a6 * a7 - a4 * a9) * b1 + (a1 * a9 - a3 * a7) * b2 + (a3 * a4 - a1 * a6) * b3)
+        z_w = (1. / D) * ((a4 * a8 - a5 * a7) * b1 + (a2 * a7 - a1 * a8) * b2 + (a1 * a5 - a2 * a4) * b3)
 
-        c_height, c_width = camera.resolution
-        p_height, p_width = projector.resolution
+        points = np.dstack([x_w, y_w, z_w])
 
-        x_c, y_c = np.meshgrid(np.arange(c_width, dtype=np.float32), np.arange(c_height, dtype=np.float32))
+        return points.reshape(-1, 3)
 
-        x_p = (phasemap * p_width) / (2.0 * np.pi * num_stripes)
-
-        P_c = camera.proj_mat
-        P_p = projector.proj_mat
+    def _points2(self, P_c, P_p, x_c, y_c, x_p):
+        c_height, c_width = x_c.shape
 
         A = np.empty((c_height, c_width, 3, 3))
         b = np.empty((c_height, c_width, 3, 1))
@@ -184,15 +193,30 @@ class StereoProfil(StereoReconstructor):
 
         pc = -np.linalg.solve(A, b)
 
-        pc = pc.reshape(-1, 3)
+        return pc.reshape(-1, 3)
+
+    def reconstruct(self, camera: devices.Camera, projector: devices.Projector, phi_shift: phase.PhaseShift, phi_unwrap: phase.PhaseUnwrap, num_stripes):
+        """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
+
+        super().reconstruct(camera, projector, phi_unwrap, phi_shift, num_stripes)
+
+        # Gather a phasemap by using the camera and projector
+        phasemap = self._gather_phasemap(camera, projector, phi_unwrap, phi_shift)
+
+        c_height, c_width = camera.resolution
+        p_height, p_width = projector.resolution
+
+        x_c, y_c = np.meshgrid(np.arange(c_width, dtype=np.float32), np.arange(c_height, dtype=np.float32))
+        x_p = (phasemap * p_height) / (2.0 * np.pi * num_stripes)
+
+        # pc = self._points2(camera.proj_mat, projector.proj_mat, x_c, y_c, x_p)
+        pc = self._points1(camera.proj_mat, projector.proj_mat, x_c, y_c, x_p)
 
         # Find the indices of any NaNs
         valid_points = ~np.isnan(pc).any(axis=1)
 
         # Remove any NaNs for masked values earlier
-        return pointcloud.from_numpy(pc[valid_points]), valid_points
-
-
+        return pc[valid_points], valid_points
 
 
 # Calibration classes
@@ -204,12 +228,10 @@ class FPCalibrator(ABC):
         pass
 
 class StereoCalibrator(FPCalibrator):
-    def __init__(self, cb_size=(7, 5), square_width=1.0, shift_mask=0.0):
+    def __init__(self, calib_board: devices.CalibrationBoard):
         super().__init__()
 
-        self.__cb_size = cb_size
-        self.__square_width = square_width
-        self.__shift_mask = shift_mask
+        self.__calib_board = calib_board
 
     def gather_phasemap(self, camera: devices.Camera, projector: devices.Projector, phi_shift: phase.PhaseShift, phi_unwrap: phase.PhaseUnwrap):
         # TODO: Add some flag to save the images whilst gathering?
@@ -218,13 +240,18 @@ class StereoCalibrator(FPCalibrator):
 
         shifted = np.empty((len(sfs), *camera.shape), dtype=np.float32)
         
+        dc_img = None
+
         # Calculate the wrapped phase maps
         for j, sf in enumerate(sfs):
             imgs = devices.fringe_project(camera, projector, sf, phases)
-            shifted[j] = phi_shift.shift(imgs, mask=self.__shift_mask)
+
+            if j == 0: dc_img = image.dc_imgs(imgs)
+
+            shifted[j] = phi_shift.shift(imgs)
 
         # Calculate unwrapped phase maps
-        return phi_unwrap.unwrap(shifted)
+        return phi_unwrap.unwrap(shifted), dc_img
     
     def gather_dc_img(self, camera: devices.Camera, projector: devices.Projector):
         # Gather a single full intensity DC img
@@ -237,14 +264,15 @@ class StereoCalibrator(FPCalibrator):
         dc_imgs = np.empty(shape=(num_imgs, *camera.shape), dtype=np.float32)
 
         for i in range(num_imgs):
-            dc_imgs[i] = self.gather_dc_img(camera, projector)
-
             # Vertical phase maps
-            phasemaps[2*i] = self.gather_phasemap(camera, projector, phi_shift, phi_unwrap)
+            projector.rotation = False
+            phasemaps[2*i], dc_imgs[i] = self.gather_phasemap(camera, projector, phi_shift, phi_unwrap)
             # phase.show_phasemap(phasemaps[2*i])
+            # image.show_image(dc_imgs[i])
             
-            # Horizontal phase maps
-            phasemaps[2*i+1] = self.gather_phasemap(camera, projector, phi_shift, phi_unwrap)
+            # Horizontal phase maps (ignore DC image as we don't need it)
+            projector.rotation = True
+            phasemaps[2*i+1], _ = self.gather_phasemap(camera, projector, phi_shift, phi_unwrap)
             # phase.show_phasemap(phasemaps[2*i+1])
 
         # Calibrate the camera and projector
@@ -262,26 +290,26 @@ class StereoCalibrator(FPCalibrator):
     def __calibrate(self, camera: devices.Camera, projector: devices.Projector, cb_imgs, phasemaps: np.ndarray, num_stripes) -> StereoProfil:
         """ The triangular stereo calibration model for fringe projection setups. """
 
+        N = len(cb_imgs)
+
         # Corner finding algorithm needs greyscale images
-        assert len(cb_imgs) * 2 == len(phasemaps)
+        assert N * 2 == len(phasemaps)
 
         world_xyz = []
         corner_pixels = []
         valid_phasemaps = []
 
-        w, h = self.__cb_size
-        cb_corners = np.zeros((w * h, 3), np.float32)
-        cb_corners[:, :2] = np.mgrid[:w, :h].T.reshape(-1, 2) * self.__square_width
+        corner_coords = self.__calib_board.get_poi_coords()
 
-        for i in range(len(cb_imgs)): # We can skip duplicate checkerboards as is bad practice
-            corners = image.find_corners(cb_imgs[i], self.__cb_size)
+        for i in range(N): # We can skip duplicate checkerboards as is bad practice
+            corners = self.__calib_board.find_pois(cb_imgs[i])
 
             if corners is None:
                 image.show_image(cb_imgs[i])
                 print(f"Could not find checkerboard corners for image {i}")
                 continue
 
-            world_xyz.append(cb_corners)
+            world_xyz.append(corner_coords)
             corner_pixels.append(corners)
 
             # Add the phasemaps
@@ -295,13 +323,19 @@ class StereoCalibrator(FPCalibrator):
         corner_pixels = np.array(corner_pixels)
 
         # Finished phase manipulation, now just need to calibrate camera and projector
-        print(f"{len(corner_pixels)} checkerboards identified")
+        print(f"{len(corner_pixels)} images with POIs correctly identified")
 
         E_c = camera.calibrate(world_xyz, corner_pixels)
         E_p = projector.calibrate(world_xyz, corner_pixels, valid_phasemaps, num_stripes)
 
+        print(f"Camera reprojection error: {E_c}")
+        print(f"Projector reprojection error: {E_p}")
+
+        E_total = self.refine_devices(camera, projector, world_xyz, corner_pixels)
+        print(f"Total reprojection error: {E_total}")
+
         self._metadata = {
-            "images_used"       : len(cb_imgs),
+            "images_used"       : N,
             "cbs_detected"      : len(world_xyz),
 
             "time_taken"        : 0.0,
@@ -310,6 +344,24 @@ class StereoCalibrator(FPCalibrator):
         }
 
         return E_c, E_p
+
+    def refine_devices(self, camera: devices.Camera, projector: devices.Projector, world_xyz, corner_pixels):
+        # calibrate stereo
+        flags = 0
+        flags |= cv2.CALIB_FIX_INTRINSIC
+
+        reproj, camera.K, camera.dist_mat, projector.K, projector.dist_mat, R, T, E, F = cv2.stereoCalibrate(world_xyz, 
+            corner_pixels, projector.proj_coords,
+            camera.K, camera.dist_mat,
+            projector.K, projector.dist_mat,
+            None, flags=flags)
+        
+        # Update projector rotation and translation
+        projector.R = np.dot(R, camera.R)
+        projector.t = np.dot(R, camera.t) + T
+        
+
+        return reproj
 
 class IPhaseHeightCalibrator(ABC):
     @abstractmethod
@@ -359,13 +411,6 @@ class MeasurementResult:
 
 # Utility functions
 
-def show_mesh(mesh):
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-    vis.add_geometry(mesh)
-    vis.run()
-    vis.destroy_window()
-
 def checkerboard_centre(cb_size, square_size):
     cx = (cb_size[0] / 2 - 1) * square_size
     cy = (cb_size[1] / 2 - 1) * square_size 
@@ -373,22 +418,6 @@ def checkerboard_centre(cb_size, square_size):
     return cx, cy
 
 # class TriangularStereoHeight(PhaseHeight):
-#     def __init__(self, ref_dist, sensor_dist, freq):
-#         super().__init__()
-        
-#         self.ref_dist = ref_dist
-#         self.sensor_dist = sensor_dist
-#         self.freq = freq
-    
-#     def heightmap(self, imgs):
-#         phase = self.phasemap(imgs)
-
-#         #heightmap = np.divide(self.ref_dist * phase_diff, 2.0 * np.pi * self.sensor_dist * self.freq)
-        
-#         #heightmap[heightmap <= 0] = 0 # Remove negative values
-
-#         return None
-
 #     def to_stl(self, heightmap):
 #         # Create vertices from the heightmap
 #         vertices = []

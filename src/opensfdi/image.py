@@ -15,31 +15,33 @@ class Image(ABC):
 
 # Images can be lazy loaded making use of lazy loading pattern
 class FileImage(Image):
-    def __init__(self, path: Path, greyscale=False):
+    def __init__(self, path: Path, channels=1):
         super().__init__(None)
 
         self._path: Path = path
 
-        self.__greyscale = greyscale
+        self.__channels = channels
 
     @property
     def raw_data(self) -> np.ndarray:
         # Check if the data needs to be loaded
         if self._raw_data is None:
-            self._raw_data = cv2.imread(str(self._path.resolve()), cv2.IMREAD_COLOR)
-            self._raw_data = self._raw_data.astype(np.float32) / 255.0 # Default to float32
+            flags = None
+            if self.__channels == 3:
+                flags = cv2.IMREAD_COLOR
+            elif self.__channels == 1:
+                flags = cv2.IMREAD_GRAYSCALE
 
-        # Change to greyscale if needed
-        if self.__greyscale: 
-            self._raw_data = to_grey(self._raw_data)
+            self._raw_data = cv2.imread(str(self._path.resolve()), flags)
+            self._raw_data = self._raw_data.astype(np.float32) / 255.0 # Default to float32
 
         return self._raw_data
 
     def __str__(self):
         return f"{self._path.absolute()}"
 
-def undistort_img(img_data, intrinsic_mat, dist_mat):
-    return cv2.undistort(img_data, intrinsic_mat, dist_mat, None, intrinsic_mat)  
+def undistort_img(img_data, K, dist_mat):
+    return cv2.undistort(img_data, K, dist_mat, None, K)  
 
 def to_grey(img_data: np.ndarray) -> np.ndarray:
     if img_data.ndim == 2: return img_data
@@ -74,24 +76,6 @@ def flip_colours(img_data):
         return img_data
     
     return cv2.cvtColor(img_data, cv2.COLOR_BGR2RGB)
-
-def find_corners(img, cb_size):
-    uint_img = to_int8(img)
-
-    # flags = cv2.CALIB_CB_EXHAUSTIVE
-    # result, corners = cv2.findChessboardCornersSB(uint_img, cb_size, flags=flags)
-    # if not result: return None
-
-    flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_EXHAUSTIVE
-    result, corners = cv2.findChessboardCorners(uint_img, cb_size, flags=flags)
-
-    if not result:
-        return None
-
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-    corners = cv2.cornerSubPix(uint_img, corners, (15, 15), (-1, -1), criteria)
-
-    return corners.squeeze()
 
 def threshold_mask(img, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
     success, result = cv2.threshold(img, threshold, max, type)
