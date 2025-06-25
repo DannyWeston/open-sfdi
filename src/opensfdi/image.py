@@ -43,6 +43,13 @@ class FileImage(Image):
 def undistort_img(img_data, K, dist_mat):
     return cv2.undistort(img_data, K, dist_mat, None, K)  
 
+def add_gaussian(img_data, sigma=0.01, mean=0.0, clip=True):
+    img_data = img_data + np.random.normal(mean, sigma, size=img_data.shape)
+
+    if clip: img_data = np.clip(img_data, 0.0, 1.0, dtype=np.float32) 
+
+    return img_data
+
 def to_grey(img_data: np.ndarray) -> np.ndarray:
     if img_data.ndim == 2: return img_data
     

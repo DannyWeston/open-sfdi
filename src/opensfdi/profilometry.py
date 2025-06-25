@@ -305,7 +305,6 @@ class StereoCalibrator(FPCalibrator):
             corners = self.__calib_board.find_pois(cb_imgs[i])
 
             if corners is None:
-                image.show_image(cb_imgs[i])
                 print(f"Could not find checkerboard corners for image {i}")
                 continue
 
@@ -360,7 +359,6 @@ class StereoCalibrator(FPCalibrator):
         projector.R = np.dot(R, camera.R)
         projector.t = np.dot(R, camera.t) + T
         
-
         return reproj
 
 class IPhaseHeightCalibrator(ABC):

@@ -1,4 +1,3 @@
-from typing import Iterator
 import numpy as np
 import cv2
 
@@ -255,12 +254,15 @@ class ProjectorRegistry:
 
 class Projector(ABC):
     @abstractmethod
-    def __init__(self, resolution=(720, 1280), channels=1):
+    def __init__(self, resolution=(720, 1280), channels=1, throw_ratio=1.0, pixel_size=1.0):
         self.__resolution = resolution
         self.__channels = channels
         self.__rotation = 0.0
         self.__phase = 0.0
         self.__spatial_freq = 8.0
+
+        self.__throw_ratio = throw_ratio    # Projector throw ratio 
+        self.__pixel_size = pixel_size      # w / h pixels
 
         self.proj_coords = None
 
@@ -281,6 +283,22 @@ class Projector(ABC):
     @dist_mat.setter
     def dist_mat(self, value):
         self.__dist_mat = value
+
+    @property
+    def throw_ratio(self):
+        return self.__throw_ratio
+    
+    @throw_ratio.setter
+    def throw_ratio(self, value):
+        self.__throw_ratio = value
+    
+    @property
+    def pixel_size(self):
+        return self.__pixel_size
+
+    @pixel_size.setter
+    def pixel_size(self, value):
+        self.__pixel_size = value
 
     @property
     def extr_mat(self):
@@ -382,13 +400,13 @@ class Projector(ABC):
 
         # Optical centre in the middle, focal length in pixels equal to resolution
         K_guess = np.array([
-            [1.2 * w,   0.0,        w / 2],
-            [0.0,       1.2*0.8*h,  h / 2],
-            [0.0,       0.0,        1.0]
+            [self.throw_ratio * w,  0.0,                                    w / 2],
+            [0.0,                   self.throw_ratio*self.pixel_size*h,     h / 2],
+            [0.0,                   0.0,                                    1.0]
         ])
 
         flags = 0
-        flags |= cv2.CALIB_FIX_K3
+        # flags |= cv2.CALIB_FIX_K3
         flags |= cv2.CALIB_USE_INTRINSIC_GUESS
 
         self.reproj_error, self.K, self.__dist_mat, R, t = cv2.calibrateCamera(world_xyz, self.proj_coords, (w, h), 
@@ -436,8 +454,8 @@ class DisplayProjector(Projector):
 
 @ProjectorRegistry.register
 class FakeProjector(Projector):
-    def __init__(self, resolution=(1080, 1920), channels=1):
-        super().__init__(resolution=resolution, channels=channels)
+    def __init__(self, resolution=(1080, 1920), channels=1, throw_ratio=1.0, pixel_size=1.0):
+        super().__init__(resolution=resolution, channels=channels, throw_ratio=throw_ratio, pixel_size=pixel_size)
 
     def display(self):
         # Do nothing
@@ -491,7 +509,8 @@ class Checkerboard(CalibrationBoard):
         return self.__cb_corners.copy()
 
 class CircleBoard(CalibrationBoard):
-    def __init__(self, circle_diameter=1.0, circle_spacing=1.0, poi_count=(10, 7), inverted=True, staggered=True):
+    
+    def __init__(self, circle_diameter=1.0, circle_spacing=1.0, poi_count=(10, 7), inverted=True, staggered=True, area_hint=None):
         self.__poi_count = poi_count
         self.__diameter = circle_diameter
         self.__spacing = circle_spacing
@@ -500,9 +519,19 @@ class CircleBoard(CalibrationBoard):
 
         # Setup blob detector
         self.__detector_params = cv2.SimpleBlobDetector_Params()
-        self.__detector_params.filterByArea = True
-        self.__detector_params.maxArea = 10000
-        self.__detector_params.minArea = 500
+
+        if area_hint is not None:
+            # 480x270   :   (100, 400)
+            # 640x360   :   (200, 1000)
+            # 960x540   :   (500, 2000)
+            # 1440x810  :   (1250, 5000)
+            # 1920x1080 :   (2500, 13000)
+            # 2560x1440 :   (5000, 20000)
+            # 3840x2160 :   (7000, 28000)
+
+            self.__detector_params.filterByArea = True
+            self.__detector_params.minArea = area_hint[0]
+            self.__detector_params.maxArea = area_hint[1]
 
         self.__detector_params.blobColor = 255 if inverted else 0
 
@@ -557,5 +586,6 @@ def fringe_project(camera: Camera, projector: Projector, sf, phases) -> np.ndarr
         projector.phase = phases[i]
         projector.display()
         imgs[i] = camera.capture().raw_data
+        # imgs[i] = image.add_gaussian(imgs[i], sigma=0.1)
 
     return imgs
