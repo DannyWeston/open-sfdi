@@ -6,8 +6,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tkinter import filedialog
 
-from opensfdi import profilometry, phase, image, devices
-from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo, save_pointcloud
+from opensfdi import calibration, image
+from opensfdi.devices import board
+from opensfdi.phase import unwrap
+from opensfdi.services import FileImageRepo, FileCameraConfigRepo, FileProjectorRepo, save_pointcloud
 
 # Initialise tkinter for file browsing
 # TODO: Change this to use paths etc
@@ -24,7 +26,7 @@ circle_spacings = [
 ]
 
 working_distances = [
-  0.0
+  0.0,
   0.03,
   0.06,
   0.09,
@@ -59,26 +61,26 @@ def test_calibration():
     (3840, 2160),
   ]
 
-  projector = devices.FakeProjector(resolution=(1140, 912), pixel_size=0.8, throw_ratio=1.0)
-  shifter = phase.NStepPhaseShift(phase_count, shift_mask=shift_mask)
-  unwrapper = phase.MultiFreqPhaseUnwrap(fringe_counts)
+  projector = board.FakeProjector(resolution=(1140, 912), pixel_size=0.8, throw_ratio=1.0)
+  shifter = unwrap.NStepPhaseShift(phase_count, shift_mask=shift_mask)
+  unwrapper = unwrap.MultiFreqPhaseUnwrap(fringe_counts)
 
   for res in resolutions:
     res_path = exp_root / f"{res[0]}x{res[1]}"
-    img_repo = FileImageRepo(res_path, file_ext='.tif')
+    img_repo = FileImageRepo(res_path, fileExt='.tif')
     
-    camera = devices.FileCamera(resolution=res[::-1], channels=1, imgs=list(img_repo.get_by("calibration", sorted=True)))
+    camera = board.FileCamera(resolution=res[::-1], channels=1, imgs=list(img_repo.GetBy("calibration", sorted=True)))
 
     area_min = (res[0] * res[1]) / 1000
     area_max = area_min * 4.5
-    calib_board = devices.CircleBoard(circle_spacing=0.03, poi_count=(4, 13), inverted=True, staggered=True, area_hint=(area_min, area_max))
+    calib_board = board.CircleBoard(circleSpacing=0.03, poiCount=(4, 13), inverted=True, staggered=True, areaHint=(area_min, area_max))
 
-    calibrator = profilometry.StereoCalibrator(calib_board)
-    calibrator.calibrate(camera, projector, shifter, unwrapper, num_imgs=orientations)
+    calibrator = calibration.StereoCalibrator(calib_board)
+    calibrator.Calibrate(camera, projector, shifter, unwrapper, imageCount=orientations)
 
     # Save the experiment information and the calibrated camera / projector
-    FileCameraRepo(res_path, overwrite=True).add(camera, "camera")
-    FileProjectorRepo(res_path, overwrite=True).add(projector, "projector")
+    FileCameraConfigRepo(res_path, overwrite=True).Add(camera, "camera")
+    FileProjectorRepo(res_path, overwrite=True).Add(projector, "projector")
 
 @pytest.mark.skip(reason="Not ready")
 def test_measurement():
@@ -99,20 +101,20 @@ def test_measurement():
   # Load projector and camera with imgs
   calib_path = Path(filedialog.askdirectory(title="Where is the folder for the optical devices?"))
   
-  cam_repo = FileCameraRepo(calib_path, overwrite=True)
-  camera: devices.FileCamera = cam_repo.get("camera")
-  img_repo = FileImageRepo(calib_path, file_ext='.tif', channels=camera.channels)
+  cam_repo = FileCameraConfigRepo(calib_path, overwrite=True)
+  camera: board.FileCamera = cam_repo.Get("camera")
+  img_repo = FileImageRepo(calib_path, fileExt='.tif', channels=camera.channels)
 
   proj_repo = FileProjectorRepo(calib_path, overwrite=True)
-  projector: devices.FakeProjector = proj_repo.get("projector")
+  projector: board.FakeProjector = proj_repo.Get("projector")
 
   # Phase related stuff
-  shifter = phase.NStepPhaseShift(phase_count, shift_mask=shift_mask)
-  unwrapper = phase.MultiFreqPhaseUnwrap(num_stripes)
-  reconstructor = profilometry.StereoProfil()
+  shifter = unwrap.NStepPhaseShift(phase_count, shift_mask=shift_mask)
+  unwrapper = unwrap.MultiFreqPhaseUnwrap(num_stripes)
+  reconstructor = calibration.StereoProfil()
 
   for obj in objects:
-    camera.imgs = list(img_repo.get_by(f"{obj}_", sorted=True))
+    camera.imgs = list(img_repo.GetBy(f"{obj}_", sorted=True))
 
     pc, _ = reconstructor.reconstruct(camera, projector, shifter, unwrapper, num_stripes[-1])
 

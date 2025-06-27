@@ -1,6 +1,5 @@
 import os
 import sys
-import cv2
 import numpy as np
 
 from contextlib import contextmanager
@@ -23,54 +22,53 @@ def stdout_redirected(to=os.devnull):
         finally:
             _redirect_stdout(to=old_stdout)
 
-class FringeFactory:
-    @staticmethod
-    def MakeBinary(frequency, phase_count, orientation, width=1024, height=1024):
-        # Maybe not a good idea to rely upon sinusoidal function but works for now :)
-        imgs = FringeFactory.MakeSinusoidal(frequency, phase_count, orientation, width, height)
+#     def to_stl(self, heightmap):
+#         # Create vertices from the heightmap
+#         vertices = []
+#         for y in range(heightmap.shape[0]):
+#             for x in range(heightmap.shape[1]):
+#                 vertices.append([x, y, heightmap[y, x]])
 
-        width, height, _ = imgs[0].shape
-        
-        for i in range(phase_count):
-            for col in range(width):
-                for row in range(height):
-                    imgs[i][col][row] = 0.0 if imgs[i][col][row] < 0.5 else 1.0
+#         vertices = np.array(vertices)
 
-        return imgs
+#         # Create faces for the mesh
+#         faces = []
+#         for y in range(heightmap.shape[0] - 1):
+#             for x in range(heightmap.shape[1] - 1):
+#                 v1 = x + y * heightmap.shape[1]
+#                 v2 = (x + 1) + y * heightmap.shape[1]
+#                 v3 = x + (y + 1) * heightmap.shape[1]
+#                 v4 = (x + 1) + (y + 1) * heightmap.shape[1]
 
-    @staticmethod
-    def MakeBinaryRGB(frequency, phase_count, orientation, width=1024, height=1024):
-        imgs = FringeFactory.MakeBinary(frequency, phase_count, orientation, width, height)
-        
-        return FringeFactory.GrayToRGB(imgs)
+#                 # First triangle
+#                 faces.append([v1, v2, v3])
+#                 # Second triangle
+#                 faces.append([v2, v4, v3])
 
-    @staticmethod
-    def MakeSinusoidal(frequency, phase_count, orientation, width=1024, height=1024):
-        imgs = np.empty((phase_count, height, width), dtype=np.float32)
-        
-        for i in range(phase_count):
-            x, y = np.meshgrid(np.arange(width, dtype=np.float32), np.arange(height, dtype=np.float32))
+#         # Create the mesh object
+#         # mesh_data = mesh.Mesh(np.zeros(len(faces), dtype=mesh.Mesh.dtype))
+#         # for i, f in enumerate(faces):
+#         #     for j in range(3):
+#         #         mesh_data.vectors[i][j] = vertices[f[j]]
 
-            gradient = np.sin(orientation) * x - np.cos(orientation) * y
+#         # mesh_data.save('heightmap_mesh.stl')
 
-            imgs[i] = np.sin(((2.0 * np.pi * gradient) / frequency) + i)
-            
-            imgs[i] = cv2.normalize(imgs[i], None, 0.0, 1.0, cv2.NORM_MINMAX, cv2.CV_32F)
-        
-        return imgs
+def makeGreyFringes(frequency, phase, orientation, resolution=(1024, 1024)):
+    w, h = resolution
+    
+    x, y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
 
-    @staticmethod
-    def MakeSinusoidalRGB(frequency, phase_count, orientation, width=1024, height=1024):
-        imgs = FringeFactory.MakeSinusoidal(frequency, phase_count, orientation, width, height)
-        
-        return FringeFactory.GrayToRGB(imgs)
+    g = np.sin(orientation) * x - np.cos(orientation) * y
 
-    @staticmethod
-    def GrayToRGB(imgs):
-        a, b, c = imgs.shape
-        rgb_imgs = np.empty(shape=(a, b, c, 3), dtype=imgs[0].dtype)
-        
-        for i, img in enumerate(imgs):
-            rgb_imgs[i] = cv2.merge((img, img, img))
+    return (np.cos((2.0 * np.pi * g * frequency) - phase) + 1.0) / 2.0
 
-        return rgb_imgs
+def makeRGBFringes(frequency, phase, orientation, resolution=(1024, 1024), rgb=[1.0, 1.0, 1.0]):
+    w, h = resolution
+
+    img = np.empty((3, h, w), dtype=np.float32)
+
+    img[2] = makeGreyFringes(frequency, phase, orientation, resolution) * rgb[0]
+    img[1] = makeGreyFringes(frequency, phase, orientation, resolution) * rgb[1]
+    img[0] = makeGreyFringes(frequency, phase, orientation, resolution) * rgb[2]
+
+    return img

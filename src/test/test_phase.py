@@ -4,8 +4,10 @@ import pytest
 from pathlib import Path
 from tkinter import filedialog
 
-from opensfdi import profilometry, phase, devices
-from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo, save_pointcloud
+from opensfdi import calibration
+from opensfdi.devices import board
+from opensfdi.phase import unwrap
+from opensfdi.services import FileImageRepo, FileCameraConfigRepo, FileProjectorRepo, save_pointcloud
 
 
 # 15 images with POIs correctly identified
@@ -57,13 +59,13 @@ def test_calibration():
     exp_root = Path(filedialog.askdirectory(title="Where is the folder for the phases?"))
 
 
-    camera = devices.FileCamera(resolution=(1080, 1920), channels=1)
-    projector = devices.FakeProjector(resolution=(1140, 912), pixel_size=0.8, throw_ratio=1.0)
-    calib_board = devices.CircleBoard(circle_spacing=0.03, poi_count=(4, 13), inverted=True, staggered=True, area_hint=(2500, 13000))
+    camera = board.FileCamera(resolution=(1080, 1920), channels=1)
+    projector = board.FakeProjector(resolution=(1140, 912), pixel_size=0.8, throw_ratio=1.0)
+    calib_board = board.CircleBoard(circleSpacing=0.03, poiCount=(4, 13), inverted=True, staggered=True, areaHint=(2500, 13000))
 
-    shifter = phase.NStepPhaseShift(shift_mask=shift_mask)
-    unwrapper = phase.MultiFreqPhaseUnwrap(fringe_counts)
-    calibrator = profilometry.StereoCalibrator(calib_board)
+    shifter = unwrap.NStepPhaseShift(shift_mask=shift_mask)
+    unwrapper = unwrap.MultiFreqPhaseUnwrap(fringe_counts)
+    calibrator = calibration.StereoCalibrator(calib_board)
 
     for phase_count in phase_counts:
         # Set correct phase count
@@ -71,17 +73,17 @@ def test_calibration():
 
         # Set correct camera images
         phase_path = exp_root / str(phase_count)
-        img_repo = FileImageRepo(phase_path, file_ext='.tif')
-        camera.imgs = list(img_repo.get_by("calibration", sorted=True))
+        img_repo = FileImageRepo(phase_path, fileExt='.tif')
+        camera.imgs = list(img_repo.GetBy("calibration", sorted=True))
 
-        calibrator.calibrate(camera, projector, shifter, unwrapper, num_imgs=orientations)
+        calibrator.Calibrate(camera, projector, shifter, unwrapper, imageCount=orientations)
 
         # Save the experiment information and the calibrated camera / projector
-        cam_repo = FileCameraRepo(phase_path, overwrite=True)
+        cam_repo = FileCameraConfigRepo(phase_path, overwrite=True)
         proj_repo = FileProjectorRepo(phase_path, overwrite=True)
 
-        cam_repo.add(camera, "camera")
-        proj_repo.add(projector, "projector")
+        cam_repo.Add(camera, "camera")
+        proj_repo.Add(projector, "projector")
 
         # TODO: Save experiment results
   
@@ -104,20 +106,20 @@ def test_measurement():
   # Load projector and camera with imgs
   calib_path = Path(filedialog.askdirectory(title="Where is the folder for the optical devices?"))
   
-  cam_repo = FileCameraRepo(calib_path, overwrite=True)
-  camera: devices.FileCamera = cam_repo.get("camera")
-  img_repo = FileImageRepo(calib_path, file_ext='.tif', channels=camera.channels)
+  cam_repo = FileCameraConfigRepo(calib_path, overwrite=True)
+  camera: board.FileCamera = cam_repo.Get("camera")
+  img_repo = FileImageRepo(calib_path, fileExt='.tif', channels=camera.channels)
 
   proj_repo = FileProjectorRepo(calib_path, overwrite=True)
-  projector: devices.FakeProjector = proj_repo.get("projector")
+  projector: board.FakeProjector = proj_repo.Get("projector")
 
   # Phase related stuff
-  shifter = phase.NStepPhaseShift(phase_count, shift_mask=shift_mask)
-  unwrapper = phase.MultiFreqPhaseUnwrap(num_stripes)
-  reconstructor = profilometry.StereoProfil()
+  shifter = unwrap.NStepPhaseShift(phase_count, shift_mask=shift_mask)
+  unwrapper = unwrap.MultiFreqPhaseUnwrap(num_stripes)
+  reconstructor = calibration.StereoProfil()
 
   for obj in objects:
-    camera.imgs = list(img_repo.get_by(f"{obj}_", sorted=True))
+    camera.imgs = list(img_repo.GetBy(f"{obj}_", sorted=True))
 
     pc, _ = reconstructor.reconstruct(camera, projector, shifter, unwrapper, num_stripes[-1])
 

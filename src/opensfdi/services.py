@@ -9,8 +9,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Generic, Iterator, TypeVar
 
-from . import devices, profilometry
-from .image import FileImage, Image, to_f32
+from .devices import camera, projector, vision
+
+from . import reconstruction as recon
+from .image import FileImage, Image, ToF32
 
 # Misc
 
@@ -33,85 +35,84 @@ def save_pointcloud(filename: Path, arr: np.ndarray):
 T = TypeVar('T')
 class IRepository(ABC, Generic[T]):
     @abstractmethod
-    def get(self, id) -> T:
+    def Get(self, id) -> T:
         raise NotImplementedError
 
     @abstractmethod
-    def get_by(self, regex, sorted: bool) -> Iterator[T]:
+    def GetBy(self, regex, sorted: bool) -> Iterator[T]:
         raise NotImplementedError
 
     @abstractmethod
-    def find(self, regex: str, sorted: bool) -> list[str]:
+    def Find(self, regex: str, sorted: bool) -> list[str]:
         raise NotImplementedError
 
     @abstractmethod
-    def add(self, **kwargs) -> None:
+    def Add(self, **kwargs) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, id) -> bool:
+    def Delete(self, id) -> bool:
         raise NotImplementedError
 
     @abstractmethod
-    def update(self, id, **kwargs) -> bool:
+    def Update(self, id, **kwargs) -> bool:
         raise NotImplementedError
 
 
 # Camera repository
 
-class BaseCameraRepo(IRepository[devices.Camera]):
+class BaseCameraConfigRepo(IRepository[camera.CameraConfig]):
     @abstractmethod
     def __init__(self, overwrite=False):
-        self._overwrite = overwrite
+        self.m_Overwrite = overwrite
 
     @abstractmethod
-    def get(self, id: str) -> devices.Camera:
+    def Get(self, id: str) -> camera.CameraConfig:
         pass
 
     @abstractmethod
-    def get_by(self, regex, sorted) -> Iterator[devices.Camera]:
+    def GetBy(self, regex, sorted) -> Iterator[camera.CameraConfig]:
         pass
 
     @abstractmethod
-    def find(self, regex: str, sorted) -> list[str]:
+    def Find(self, regex: str, sorted) -> list[str]:
         pass
 
     @abstractmethod
-    def add(self, camera: devices.Camera, id: str) -> None:
+    def Add(self, config: camera.CameraConfig, id: str) -> None:
         pass
 
     @abstractmethod
-    def delete(self, id: str) -> bool:
+    def Delete(self, id: str) -> bool:
         pass
 
     @abstractmethod
-    def update(self, camera: devices.Camera) -> bool:
+    def Update(self, config: camera.CameraConfig) -> bool:
         pass
 
-class FileCameraRepo(BaseCameraRepo):
+class FileCameraConfigRepo(BaseCameraConfigRepo):
     def __init__(self, storage_dir: Path, overwrite=False):
         super().__init__(overwrite=overwrite)
 
-        self.__storage_dir = storage_dir
+        self.m_StorageDir = storage_dir
 
-    def get(self, id: str) -> devices.Camera:
-        found = self.find(id, sorted=False)
+    def Get(self, id: str) -> camera.CameraConfig:
+        found = self.Find(id, sorted=False)
 
         if len(found) < 1:
-            raise Exception(f"Camera with name '{id}' could not be found on disk")
+            raise Exception(f"Camera config with name '{id}' could not be found on disk")
 
-        camera = self.__load_camera(id)
+        camera = self.__LoadConfig(id)
 
-        if camera:
-            return camera
+        if camera: return camera
         
         raise Exception("Could not construct camera")
 
-    def get_by(self, regex, sorted) -> Iterator[devices.Camera]:
-        yield from (self.__load_camera(file) for file in self.find(regex, sorted))
+    def GetBy(self, regex, sorted) -> Iterator[camera.CameraConfig]:
+        yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
 
-    def find(self, regex: str, sorted) -> list[str]:
-        files = [file.stem for file in self.__storage_dir.glob("*.json")]
+    def Find(self, regex: str, sorted) -> list[str]:
+        files = [file.stem for file in self.m_StorageDir.glob("*.json")]
 
         files = list(filter(lambda name: re.match(regex, name), files))
 
@@ -119,124 +120,118 @@ class FileCameraRepo(BaseCameraRepo):
 
         return files
 
-    def add(self, camera: devices.Camera, id: str) -> None:
-        if not devices.CameraRegistry.is_registered(camera.__class__):
-            raise Exception("Camera is not registered to be saved")
+    def Add(self, config: camera.CameraConfig, id: str) -> None:
+        found = self.Find(id, False)
 
-        found = self.find(id, False)
-
-        if 0 < len(found) and (not self._overwrite):
+        if 0 < len(found) and (not self.m_Overwrite):
             raise Exception(f"{id} already exists and cannot be saved (overwriting disabled)")
 
         # Save metadata
-        with open(self.__storage_dir / f"{id}.json", "w") as json_file:
+        with open(self.m_StorageDir / f"{id}.json", "w") as jsonFile:
             data = {
-                "camera_type"   : camera.__class__.__name__,
-                "calibrated"    : camera.calibrated,
-                "resolution"    : list(camera.resolution),
-                "channels"      : camera.channels
+                "Resolution"    : list(config.resolution),
+                "Channels"      : config.channels
             }
 
-            if camera.calibrated:
-                data["K"]               = camera.K.tolist(),
-                data["R"]               = camera.R.tolist(),
-                data["t"]               = camera.t.tolist(),
-                data["dist_mat"]        = camera.dist_mat.tolist(),
-                data["reproj_error"]    = camera.reproj_error,
+            if isinstance(config, camera.CalibratedCameraConfig):
+                vc = config.visionConfig
+                data["IntrinsicMat"]        = vc.intrinsicMat.tolist()
+                data["Rotation"]            = vc.rotation.tolist()
+                data["Translation"]         = vc.translation.tolist()
+                data["DistortMat"]          = vc.distortMat.tolist()
+                data["ReprojErr"]           = vc.reprojErr
+                data["TargetResolution"]    = list(vc.targetResolution)
+                data["PosePOICoords"]       = vc.posePOICoords.tolist()
 
-            # Save any cv2 device stream
-            if isinstance(camera, devices.CV2Camera):
-                data["cv2_device"] = camera.device
+            json.dump(data, jsonFile, indent=2)
 
-            json.dump(data, json_file, indent=2)
-
-        # Should now be written !
-
-    def delete(self, id: str) -> bool:
+    def Delete(self, id: str) -> bool:
+        # TODO: Implement
         pass
 
-    def update(self, exp: devices.Camera) -> bool:
+    def Update(self, config: camera.CameraConfig) -> bool:
+        # TODO: Implement
         pass
 
-    def __load_camera(self, name):
-        with open(self.__storage_dir / f"{name}.json", "r") as json_file:
-            raw_json = json.load(json_file)
+    def __LoadConfig(self, name):
+        with open(self.m_StorageDir / f"{name}.json", "r") as jsonFile:
+            rawJson = json.load(jsonFile)
 
-        clazz = devices.CameraRegistry.get_class(raw_json["camera_type"])
+        if not rawJson["IntrinsicMat"]:
+            return camera.CameraConfig(
+                tuple(rawJson["Resolution"]), rawJson["Channels"], 
+            )
 
-        if clazz is None: return None
+        # Camera is characterised so make calibrated config
+        visionConfig = vision.VisionConfig(
+            rotation=np.array(rawJson["Rotation"]),
+            translation=np.array(rawJson["Translation"]),
+            intrinsicMat=np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
+            distortMat=np.array(rawJson["DistortMat"]),
+            reprojErr=rawJson["ReprojErr"],
+            targetResolution=rawJson["TargetResolution"],
+            posePOICoords=np.array(rawJson["PosePOICoords"])
+        )
 
-        camera: devices.Camera = clazz(resolution=tuple(raw_json["resolution"]), channels=1)
-        camera.calibrated           = raw_json["calibrated"]
-
-        if isinstance(camera, devices.CV2Camera):
-            camera.device = raw_json["cv2_device"]
-
-        if raw_json["calibrated"]:
-            camera.K            = np.array(raw_json["K"]).reshape((3, 3))
-            camera.R            = np.array(raw_json["R"]).reshape((3, 3))
-            camera.t            = np.array(raw_json["t"]).reshape((3, 1))
-            camera.dist_mat     = np.array(raw_json["dist_mat"])
-            camera.reproj_error = raw_json["reproj_error"]
-            
-
-        return camera
-
+        return camera.CalibratedCameraConfig(
+            tuple(rawJson["Resolution"]), rawJson["Channels"], 
+            visionConfig=visionConfig
+        )
 
 # Projector Repositories
 
-class BaseProjectorRepo(IRepository[devices.Projector]):
+class BaseProjectorConfigRepo(IRepository[projector.ProjectorConfig]):
     @abstractmethod
     def __init__(self, overwrite=False):
-        self._overwrite = overwrite
+        self.m_Overwrite = overwrite
 
     @abstractmethod
-    def get(self, id: str) -> devices.Projector:
+    def Get(self, id: str) -> projector.ProjectorConfig:
         pass
 
     @abstractmethod
-    def get_by(self, regex, sorted) -> Iterator[devices.Projector]:
+    def GetBy(self, regex, sorted) -> Iterator[projector.ProjectorConfig]:
         pass
 
     @abstractmethod
-    def find(self, regex: str, sorted) -> list[str]:
+    def Find(self, regex: str, sorted) -> list[str]:
         pass
 
     @abstractmethod
-    def add(self, projector: devices.Projector, id: str) -> None:
+    def Add(self, config: projector.ProjectorConfig, id: str) -> None:
         pass
 
     @abstractmethod
-    def delete(self, id: str) -> bool:
+    def Delete(self, id: str) -> bool:
         pass
 
     @abstractmethod
-    def update(self, projector: devices.Projector) -> bool:
+    def Update(self, config: projector.ProjectorConfig) -> bool:
         pass
 
-class FileProjectorRepo(BaseProjectorRepo):
-    def __init__(self, storage_dir: Path, overwrite=False):
+class FileProjectorRepo(BaseProjectorConfigRepo):
+    def __init__(self, storageDir: Path, overwrite=False):
         super().__init__(overwrite=overwrite)
 
-        self.__storage_dir = storage_dir
+        self.m_StorageDir = storageDir
 
-    def get(self, id: str) -> devices.Projector:
-        found = self.find(id, sorted=False)
+    def Get(self, id: str) -> projector.ProjectorConfig:
+        found = self.Find(id, sorted=False)
 
         if len(found) < 1:
-            raise Exception(f"Projector with name '{id}' could not be found on disk")
+            raise Exception(f"Projector config with name '{id}' could not be found on disk")
 
-        projector = self.__load_projector(id)
+        config = self.__LoadConfig(id)
 
-        if projector: return projector
+        if config: return config
         
         raise Exception("Could not construct projector")
 
-    def get_by(self, regex, sorted) -> Iterator[devices.Projector]:
-        yield from (self.__load_projector(file) for file in self.find(regex, sorted))
+    def GetBy(self, regex, sorted) -> Iterator[projector.ProjectorConfig]:
+        yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
 
-    def find(self, regex: str, sorted) -> list[str]:
-        files = [file.stem for file in self.__storage_dir.glob("*.json")]
+    def Find(self, regex: str, sorted) -> list[str]:
+        files = [file.stem for file in self.m_StorageDir.glob("*.json")]
 
         files = list(filter(lambda name: re.match(regex, name), files))
 
@@ -244,94 +239,97 @@ class FileProjectorRepo(BaseProjectorRepo):
 
         return files
 
-    def add(self, projector: devices.Projector, id: str) -> None:
-        if not devices.ProjectorRegistry.is_registered(projector.__class__):
-            raise Exception("Projector is not registered to be saved")
-        
-        found = self.find(id, False)
+    def Add(self, config: projector.ProjectorConfig, id: str) -> None:
+        found = self.Find(id, False)
 
-        if 0 < len(found) and (not self._overwrite):
+        if 0 < len(found) and (not self.m_Overwrite):
             raise Exception(f"{id} already exists and cannot be saved (overwriting disabled)")
 
         # Save metadata
-        with open(self.__storage_dir / f"{id}.json", "w") as json_file:
+        with open(self.m_StorageDir / f"{id}.json", "w") as json_file:
             data = {
-                "projector_type"   : projector.__class__.__name__,
-                "calibrated"    : projector.calibrated,
-                "resolution"    : list(projector.resolution),
-                "channels"      : projector.channels
+                "Resolution"    : list(config.resolution),
+                "Channels"      : config.channels,
+                "ThrowRatio"    : config.throwRatio,
+                "PixelSize"     : config.pixelSize
             }
 
-            if projector.calibrated:
-                data["K"]               = projector.K.tolist(),
-                data["R"]               = projector.R.tolist(),
-                data["t"]               = projector.t.tolist(),
-                data["dist_mat"]        = projector.dist_mat.tolist(),
-                data["reproj_error"]    = projector.reproj_error,
-
-            # Save any cv2 device stream
-            if isinstance(projector, devices.DisplayProjector):
-                data["display_device"] = True
+            if isinstance(config, projector.CalibratedProjectorConfig):
+                vc = config.visionConfig
+                data["Rotation"]            = vc.rotation.tolist()
+                data["Translation"]         = vc.translation.tolist()
+                data["IntrinsicMat"]        = vc.intrinsicMat.tolist()
+                data["DistortMat"]          = vc.distortMat.tolist()
+                data["ReprojErr"]           = vc.reprojErr
+                data["TargetResolution"]    = list(vc.targetResolution)
+                data["PosePOICoords"]       = vc.posePOICoords.tolist()
 
             json.dump(data, json_file, indent=2)
 
-        # Should now be written !
-
-    def delete(self, id: str) -> bool:
+    def Delete(self, id: str) -> bool:
+        # TODO: Implement
         pass
 
-    def update(self, projector: devices.Projector) -> bool:
+    def Update(self, config: projector.FringeProjector) -> bool:
+        # TODO: Implement
         pass
 
-    def __load_projector(self, name):
-        with open(self.__storage_dir / f"{name}.json", "r") as json_file:
-            raw_json = json.load(json_file)
+    def __LoadConfig(self, name):
+        with open(self.m_StorageDir / f"{name}.json", "r") as jsonFile:
+            rawJson = json.load(jsonFile)
 
-        clazz = devices.ProjectorRegistry.get_class(raw_json["projector_type"])
+            if not rawJson["IntrinsicMat"]:
+                return projector.ProjectorConfig(
+                    tuple(rawJson["Resolution"]), rawJson["Channels"],
+                    rawJson["ThrowRatio"], rawJson["PixelSize"]
+                )
 
-        if not clazz: return None
+            # Projector is characterised so make calibrated config
+            visionConfig = vision.VisionConfig(
+                rotation=np.array(rawJson["Rotation"]),
+                translation=np.array(rawJson["Translation"]),
+                intrinsicMat=np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
+                distortMat=np.array(rawJson["DistortMat"]),
+                reprojErr=rawJson["ReprojErr"],
+                targetResolution=rawJson["TargetResolution"],
+                posePOICoords=np.array(rawJson["PosePOICoords"])
+            )
 
-        projector: devices.Projector = clazz(resolution=tuple(raw_json["resolution"]), channels=1)
-        projector.calibrated           = raw_json["calibrated"]
-
-        if raw_json["calibrated"]:
-            projector.K             = np.array(raw_json["K"]).reshape((3, 3))
-            projector.R             = np.array(raw_json["R"]).reshape((3, 3))
-            projector.t             = np.array(raw_json["t"]).reshape((3, 1))
-            projector.dist_mat      = np.array(raw_json["dist_mat"])
-            projector.reproj_error  = raw_json["reproj_error"]
-
-        return projector
+            return projector.CalibratedProjectorConfig(
+                tuple(rawJson["Resolution"]), rawJson["Channels"],
+                rawJson["ThrowRatio"], rawJson["PixelSize"],
+                visionConfig
+            )
 
 
 # File structure repository
 
-class BaseExperimentRepo(IRepository[profilometry.IReconstructor]):
+class BaseExperimentRepo(IRepository[recon.IReconstructor]):
     def __init__(self, overwrite):
         self.overwrite = overwrite
 
     @abstractmethod
-    def get(self, id: str) -> profilometry.IReconstructor:
+    def Get(self, id: str) -> recon.IReconstructor:
         pass
 
     @abstractmethod
-    def get_by(self, regex, sorted) -> Iterator[profilometry.IReconstructor]:
+    def GetBy(self, regex, sorted) -> Iterator[recon.IReconstructor]:
         pass
 
     @abstractmethod
-    def find(self, regex: str, sorted) -> list[str]:
+    def Find(self, regex: str, sorted) -> list[str]:
         pass
 
     @abstractmethod
-    def add(self, exp: profilometry.IReconstructor) -> None:
+    def Add(self, exp: recon.IReconstructor) -> None:
         pass
 
     @abstractmethod
-    def delete(self, id: str) -> bool:
+    def Delete(self, id: str) -> bool:
         pass
 
     @abstractmethod
-    def update(self, exp: profilometry.IReconstructor) -> bool:
+    def Update(self, exp: recon.IReconstructor) -> bool:
         pass
 
 class FileExperimentRepo(BaseExperimentRepo):
@@ -357,19 +355,19 @@ class FileExperimentRepo(BaseExperimentRepo):
 
         return recon
 
-    def get(self, name: str) -> profilometry.IReconstructor:
-        found = self.find(name)
+    def Get(self, name: str) -> recon.IReconstructor:
+        found = self.Find(name)
 
         if len(found) < 1:
             raise Exception(f"Experiment with name '{name}' does not exist")
 
         return self.__build_exp(name)
     
-    def get_by(self, regex, sorted=False) -> Iterator[profilometry.IReconstructor]:
+    def GetBy(self, regex, sorted=False) -> Iterator[recon.IReconstructor]:
         # Match all files with correct file extension
-        yield from (self.__build_exp(fn) for fn in self.find(regex, sorted))
+        yield from (self.__build_exp(fn) for fn in self.Find(regex, sorted))
 
-    def find(self, regex: str, sorted=False) -> list[str]:
+    def Find(self, regex: str, sorted=False) -> list[str]:
         folders = [folder.stem for folder in self.storage_dir.glob("*/")]
         
         folders = list(filter(lambda name: re.match(regex, name), folders))
@@ -378,8 +376,8 @@ class FileExperimentRepo(BaseExperimentRepo):
 
         return folders
 
-    def add(self, recon: profilometry.IReconstructor, name: str) -> None:
-        found = self.find(name)
+    def Add(self, recon: recon.IReconstructor, name: str) -> None:
+        found = self.Find(name)
 
         if 0 < len(found) and (not self.overwrite):
             raise Exception(f"Experiment with name {name} already exists (overwriting disabled)")
@@ -401,8 +399,8 @@ class FileExperimentRepo(BaseExperimentRepo):
 
         # Should now be written !
 
-    def delete(self, name: str) -> bool:
-        found = self.find(name)
+    def Delete(self, name: str) -> bool:
+        found = self.Find(name)
 
         if 0 < len(found):
             path:Path = self.storage_dir / found[0]
@@ -411,9 +409,9 @@ class FileExperimentRepo(BaseExperimentRepo):
 
         return False
 
-    def update(self, exp: profilometry.IReconstructor) -> bool:
+    def Update(self, exp: recon.IReconstructor) -> bool:
         # TODO: Fix
-        self.add(exp)
+        self.Add(exp)
 
 
 # Image repositories
@@ -434,43 +432,43 @@ class BaseImageRepo(IRepository[Image]):
         self.__channels = value
 
     @abstractmethod
-    def get(self, id: str) -> Image:
+    def Get(self, id: str) -> Image:
         raise NotImplementedError
     
     @abstractmethod
-    def get_by(self, regex, sorted) -> Iterator[Image]:
+    def GetBy(self, regex, sorted) -> Iterator[Image]:
         pass
 
     @abstractmethod
-    def add(self, img: Image, name: str) -> None:
+    def Add(self, img: Image, name: str) -> None:
         raise NotImplementedError
     
     @abstractmethod
-    def find(self, regex: str, sorted) -> list[str]:
+    def Find(self, regex: str, sorted) -> list[str]:
         raise NotImplementedError
 
     @abstractmethod
-    def delete(self, id) -> bool:
+    def Delete(self, id) -> bool:
         pass
 
     @abstractmethod
-    def update(self, id, **kwargs) -> bool:
+    def Update(self, id, **kwargs) -> bool:
         pass
 
 class FileImageRepo(BaseImageRepo):
-    def __init__(self, storage_dir: Path, file_ext='.tif', overwrite=False, channels=1):
+    def __init__(self, storage_dir: Path, fileExt='.tif', overwrite=False, channels=1):
         super().__init__(overwrite=overwrite, channels=channels)
 
         self.storage_dir = storage_dir
-        self._file_ext = file_ext
+        self._file_ext = fileExt
 
     def __load_img(self, filename):
         return FileImage(self.storage_dir / f"{filename}{self._file_ext}", channels=self.channels)
 
-    def add(self, img: Image, id: str):
+    def Add(self, img: Image, id: str):
         ''' Save an image to a repository '''
 
-        found = self.find(id)
+        found = self.Find(id)
 
         if 0 < len(found) and (not self.overwrite):
             raise FileExistsError(f"Image with id {found[0]} already exists")
@@ -478,20 +476,20 @@ class FileImageRepo(BaseImageRepo):
         path:Path = self.storage_dir / found[0]
 
         # Save as float32 to disk
-        cv2.imwrite(str(path.resolve()), cv2.cvtColor(to_f32(img), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToF32(img), cv2.COLOR_RGB2BGR))
 
-    def get(self, id: str) -> FileImage:
-        found = self.find(id)
+    def Get(self, id: str) -> FileImage:
+        found = self.Find(id)
 
         if len(found) < 1:
             raise FileNotFoundError(f"Could not find image with id '{id}'")
 
         return self.__load_img(found[0])
 
-    def get_by(self, regex, sorted=False) -> Iterator[Image]:
-        yield from (self.__load_img(fn) for fn in self.find(regex, sorted))
+    def GetBy(self, regex, sorted=False) -> Iterator[Image]:
+        yield from (self.__load_img(fn) for fn in self.Find(regex, sorted))
 
-    def find(self, regex: str, sorted=False) -> list[str]:
+    def Find(self, regex: str, sorted=False) -> list[str]:
         filenames = [file.stem for file in self.storage_dir.glob(f"*{self._file_ext}")]
 
         filenames = list(filter(lambda filename: re.match(regex, filename), filenames))
@@ -501,23 +499,23 @@ class FileImageRepo(BaseImageRepo):
         return filenames
 
     # NOT IMPLEMENTED
-    def delete(self, id) -> bool:
+    def Delete(self, id) -> bool:
         raise NotImplementedError
 
-    def update(self, id, **kwargs) -> bool:
+    def Update(self, id, **kwargs) -> bool:
         raise NotImplementedError
 
 
 # Services
 
 class Experiment:
-    def __init__(self, name: str, reconst, metadata=None):
+    def __init__(self, name: str, reconst: recon.IReconstructor, metadata=None):
         self.name = name
         self.reconst = reconst
         self.metadata = metadata
 
 class ExperimentService:
-    def __init__(self, exp_repo:BaseExperimentRepo, img_repo:BaseImageRepo):
+    def __init__(self, exp_repo : BaseExperimentRepo, img_repo : BaseImageRepo):
         super().__init__()
 
         self._exp_repo = exp_repo
@@ -525,7 +523,7 @@ class ExperimentService:
 
     def save_experiment(self, reconst, name):
         try:
-            self._exp_repo.add(reconst, name)
+            self._exp_repo.Add(reconst, name)
         except FileExistsError:
             return False
         
@@ -533,23 +531,23 @@ class ExperimentService:
 
     def save_img(self, img, name, experiment) -> bool:
         try:
-            self._img_repo.add(img, name)
+            self._img_repo.Add(img, name)
         except FileExistsError:
             return False
         
         return True
 
-    def load_experiment(self, name) -> profilometry.IReconstructor:
-        return self._exp_repo.get(name)
+    def load_experiment(self, name) -> recon.IReconstructor:
+        return self._exp_repo.Get(name)
 
     def load_img(self, name) -> Image:
-        return self._img_repo.get(name)
+        return self._img_repo.Get(name)
 
     def get_by(self, regex, sorted=False) -> Iterator[Image]:
-        yield from self._img_repo.get_by(regex, sorted)
+        yield from self._img_repo.GetBy(regex, sorted)
 
     def get_exp_list(self):
-        return self._exp_repo.find(".*")
+        return self._exp_repo.Find(".*")
 
     def exp_exists(self, name):
-        return self._exp_repo.find(f"{name}+$") == 1
+        return self._exp_repo.Find(f"{name}+$") == 1

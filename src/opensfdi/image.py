@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from abc import ABC
 
+from .devices.vision import VisionConfig
+
 class Image(ABC):
     def __init__(self, data: np.ndarray):
         self._raw_data = data
@@ -40,17 +42,17 @@ class FileImage(Image):
     def __str__(self):
         return f"{self._path.absolute()}"
 
-def undistort_img(img_data, K, dist_mat):
-    return cv2.undistort(img_data, K, dist_mat, None, K)  
+def Undistort(img_data, config: VisionConfig):
+    return cv2.undistort(img_data, config.intrinsicMat, config.distortMat, None, config.intrinsicMat)  
 
-def add_gaussian(img_data, sigma=0.01, mean=0.0, clip=True):
+def AddGaussian(img_data, sigma=0.01, mean=0.0, clip=True):
     img_data = img_data + np.random.normal(mean, sigma, size=img_data.shape)
 
     if clip: img_data = np.clip(img_data, 0.0, 1.0, dtype=np.float32) 
 
     return img_data
 
-def to_grey(img_data: np.ndarray) -> np.ndarray:
+def ToGrey(img_data: np.ndarray) -> np.ndarray:
     if img_data.ndim == 2: return img_data
     
     if img_data.ndim == 3:
@@ -60,7 +62,7 @@ def to_grey(img_data: np.ndarray) -> np.ndarray:
 
     raise Exception("Image is in unrecognised format")
 
-def to_f32(img_data) -> np.ndarray:
+def ToF32(img_data) -> np.ndarray:
     if img_data.dtype == np.float32:
         return img_data
 
@@ -69,7 +71,7 @@ def to_f32(img_data) -> np.ndarray:
     
     raise Exception(f"Image must be in integer format (found {img_data.dtype})")
 
-def to_int8(img_data) -> np.ndarray:
+def ToU8(img_data) -> np.ndarray:
     if img_data.dtype == np.uint8:
         return img_data
 
@@ -78,21 +80,14 @@ def to_int8(img_data) -> np.ndarray:
     
     return (img_data * 255.0).astype(np.uint8)
 
-def flip_colours(img_data):
-    if img_data.ndim != 3:
-        return img_data
-    
-    return cv2.cvtColor(img_data, cv2.COLOR_BGR2RGB)
-
-def threshold_mask(img, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
+def ThresholdMask(img, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
     success, result = cv2.threshold(img, threshold, max, type)
 
-    if not success:
-        return None
+    if not success: return None
     
     return result
 
-def calc_modulation(imgs, phases):
+def CalculateModulation(imgs, phases):
     N = len(phases)
 
     a = np.zeros_like(imgs[0])
@@ -104,11 +99,11 @@ def calc_modulation(imgs, phases):
 
     return (2.0 / N) * np.sqrt(a + b)
 
-def dc_imgs(imgs) -> np.ndarray:
+def DC(imgs) -> np.ndarray:
     """ Calculate average intensity across supplied imgs (return uint8 format)"""
     return np.sum(imgs, axis=0, dtype=np.float32) / len(imgs)
 
-def calc_vignetting(img: np.ndarray, expected_max=None):
+def CalculateVignette(img: np.ndarray, expected_max=None):
     if expected_max is None:
         expected_max = img.max()
 
@@ -116,7 +111,7 @@ def calc_vignetting(img: np.ndarray, expected_max=None):
 
     return ideal_img - img
 
-def calc_gamma(img: np.ndarray):
+def CalculateGamma(img: np.ndarray):
     kernel = (9, 16) # 9 pixels tall, 16 wide
 
     h = int(img.shape[0] / 2)
@@ -131,7 +126,7 @@ def calc_gamma(img: np.ndarray):
 
     return np.mean(roi)
 
-def show_image(img, name='Image', size=None, wait=0):
+def Show(img: np.ndarray, name='Image', size=None, wait=0):
     if size is None: size = img.shape[1::-1]
 
     if cv2.getWindowProperty(name, cv2.WND_PROP_VISIBLE) < 0:
