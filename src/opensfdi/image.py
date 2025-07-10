@@ -9,79 +9,80 @@ from .devices.vision import VisionConfig
 
 class Image(ABC):
     def __init__(self, data: np.ndarray):
-        self._raw_data = data
+        self.m_RawData = data
 
     @property
-    def raw_data(self) -> np.ndarray:
-        return self._raw_data
+    def rawData(self) -> np.ndarray:
+        return self.m_RawData
 
 # Images can be lazy loaded making use of lazy loading pattern
 class FileImage(Image):
     def __init__(self, path: Path, channels=1):
         super().__init__(None)
 
-        self._path: Path = path
+        self.m_Path: Path = path
 
-        self.__channels = channels
+        self.m_Channels = channels
 
     @property
-    def raw_data(self) -> np.ndarray:
+    def rawData(self) -> np.ndarray:
         # Check if the data needs to be loaded
-        if self._raw_data is None:
+        if self.m_RawData is None:
             flags = None
-            if self.__channels == 3:
+            if self.m_Channels == 3:
                 flags = cv2.IMREAD_COLOR
-            elif self.__channels == 1:
+
+            elif self.m_Channels == 1:
                 flags = cv2.IMREAD_GRAYSCALE
 
-            self._raw_data = cv2.imread(str(self._path.resolve()), flags)
-            self._raw_data = self._raw_data.astype(np.float32) / 255.0 # Default to float32
+            self.m_RawData = cv2.imread(str(self.m_Path.resolve()), flags)
+            self.m_RawData = self.m_RawData.astype(np.float32) / 255.0 # Default to float32
 
-        return self._raw_data
+        return self.m_RawData
 
     def __str__(self):
-        return f"{self._path.absolute()}"
+        return f"{self.m_Path.absolute()}"
 
 def Undistort(img_data, config: VisionConfig):
     return cv2.undistort(img_data, config.intrinsicMat, config.distortMat, None, config.intrinsicMat)  
 
-def AddGaussian(img_data, sigma=0.01, mean=0.0, clip=True):
-    img_data = img_data + np.random.normal(mean, sigma, size=img_data.shape)
+def AddGaussian(rawData, sigma=0.01, mean=0.0, clip=True):
+    rawData = rawData + np.random.normal(mean, sigma, size=rawData.shape)
 
-    if clip: img_data = np.clip(img_data, 0.0, 1.0, dtype=np.float32) 
+    if clip: rawData = np.clip(rawData, 0.0, 1.0, dtype=np.float32) 
 
-    return img_data
+    return rawData
 
-def ToGrey(img_data: np.ndarray) -> np.ndarray:
-    if img_data.ndim == 2: return img_data
+def ToGrey(rawData: np.ndarray) -> np.ndarray:
+    if rawData.ndim == 2: return rawData
     
-    if img_data.ndim == 3:
-        h, w, c = img_data.shape
-        if c == 1: return img_data.squeeze()
-        if c == 3: return cv2.cvtColor(img_data, cv2.COLOR_BGR2GRAY)
+    if rawData.ndim == 3:
+        h, w, c = rawData.shape
+        if c == 1: return rawData.squeeze()
+        if c == 3: return cv2.cvtColor(rawData, cv2.COLOR_BGR2GRAY)
 
     raise Exception("Image is in unrecognised format")
 
-def ToF32(img_data) -> np.ndarray:
-    if img_data.dtype == np.float32:
-        return img_data
+def ToF32(rawData) -> np.ndarray:
+    if rawData.dtype == np.float32:
+        return rawData
 
-    if img_data.dtype == int or img_data.dtype == cv2.CV_8U or img_data.dtype == np.uint8:
-        return img_data.astype(np.float32) / 255.0
+    if rawData.dtype == int or rawData.dtype == cv2.CV_8U or rawData.dtype == np.uint8:
+        return rawData.astype(np.float32) / 255.0
     
-    raise Exception(f"Image must be in integer format (found {img_data.dtype})")
+    raise Exception(f"Image must be in integer format (found {rawData.dtype})")
 
-def ToU8(img_data) -> np.ndarray:
-    if img_data.dtype == np.uint8:
-        return img_data
+def ToU8(rawData) -> np.ndarray:
+    if rawData.dtype == np.uint8:
+        return rawData
 
-    if img_data.dtype != np.float32:
-        raise Exception(f"Image must be in float format (found {img_data.dtype})")
+    if rawData.dtype != np.float32:
+        raise Exception(f"Image must be in float format (found {rawData.dtype})")
     
-    return (img_data * 255.0).astype(np.uint8)
+    return (rawData * 255.0).astype(np.uint8)
 
-def ThresholdMask(img, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
-    success, result = cv2.threshold(img, threshold, max, type)
+def ThresholdMask(rawData, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
+    success, result = cv2.threshold(rawData, threshold, max, type)
 
     if not success: return None
     
@@ -103,40 +104,34 @@ def DC(imgs) -> np.ndarray:
     """ Calculate average intensity across supplied imgs (return uint8 format)"""
     return np.sum(imgs, axis=0, dtype=np.float32) / len(imgs)
 
-def CalculateVignette(img: np.ndarray, expected_max=None):
-    if expected_max is None:
-        expected_max = img.max()
+def CalculateVignette(rawData: np.ndarray, expectedMax=None):
+    if expectedMax is None: expectedMax = rawData.max()
 
-    ideal_img = np.ones_like(img) * expected_max
+    idealImg = np.ones_like(rawData) * expectedMax
 
-    return ideal_img - img
+    return idealImg - rawData
 
-def CalculateGamma(img: np.ndarray):
-    kernel = (9, 16) # 9 pixels tall, 16 wide
-
-    h = int(img.shape[0] / 2)
+def CalculateGamma(rawData: np.ndarray, kernel=(9, 16)):
+    h = int(rawData.shape[0] / 2)
     h1 = h - kernel[0]
     h2 = h + kernel[0]
 
-    w = int(img.shape[1] / 2)
+    w = int(rawData.shape[1] / 2)
     w1 = w - kernel[1]
     w2 = w + kernel[1]
 
-    roi = img[h1:h2, w1:w2]
+    roi = rawData[h1:h2, w1:w2]
 
     return np.mean(roi)
 
-def Show(img: np.ndarray, name='Image', size=None, wait=0):
-    if size is None: size = img.shape[1::-1]
-
+def Show(rawData: np.ndarray, name='Image', wait=0):
     if cv2.getWindowProperty(name, cv2.WND_PROP_VISIBLE) < 0:
         cv2.namedWindow(name, cv2.WINDOW_NORMAL)
     
-    cv2.imshow(name, cv2.resize(img, size))
-    cv2.resizeWindow(name, size[0], size[1])
+    cv2.imshow(name, rawData)
     cv2.waitKey(wait)
 
-def show_scatter(xss, yss):
+def ShowScatter(xss, yss):
     fig = plt.figure()
     ax1 = fig.add_subplot()
 

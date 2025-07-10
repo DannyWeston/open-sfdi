@@ -2,7 +2,8 @@ import numpy as np
 
 from abc import ABC, abstractmethod
 
-from ..image import ThresholdMask
+from . import ShowPhasemap
+from ..image import ThresholdMask, Show
 
 class PhaseShift(ABC):
     @abstractmethod
@@ -16,7 +17,7 @@ class PhaseShift(ABC):
         raise NotImplementedError
     
     @abstractmethod
-    def shift(self, imgs) -> np.ndarray:
+    def Shift(self, imgs) -> np.ndarray:
         raise NotImplementedError
     
     @property
@@ -37,7 +38,7 @@ class NStepPhaseShift(PhaseShift):
         if phase_count < 3:
             raise Exception("The N-step method requires 3 or more phases")
 
-    def shift(self, imgs) -> np.ndarray:
+    def Shift(self, imgs) -> np.ndarray:
         a = np.zeros_like(imgs[0])
         b = np.zeros_like(a)
 
@@ -51,14 +52,15 @@ class NStepPhaseShift(PhaseShift):
             a += imgs[i] * np.sin(phase)
             b += imgs[i] * np.cos(phase)
 
-        result = np.arctan2(a, b)
+        result = np.arctan2(-a, b)
         result[result < 0] += 2.0 * np.pi # Correct arctan2 function
 
-        if 0.0 < self._shift_mask:
-            mod = (2.0 / N) * np.sqrt(a ** 2 + b ** 2)
-            float_mask = ThresholdMask(mod, threshold=self._shift_mask)
-            float_mask[float_mask == 0.0] = np.nan # Set to nans
+        if self._shift_mask <= 0.0:
+            return result
+            
+        mod = (2.0 / N) * np.sqrt(a ** 2 + b ** 2)
 
-            result *= float_mask
+        float_mask = ThresholdMask(mod, threshold=self._shift_mask)
+        float_mask[float_mask == 0.0] = np.nan # Set to nans
 
-        return result
+        return result * float_mask

@@ -1,12 +1,11 @@
 import tkinter as tk
 import numpy as np
 import pytest
-import matplotlib.pyplot as plt
 
 from pathlib import Path
 from tkinter import filedialog
 
-from opensfdi import calibration, image
+from opensfdi import calibration
 from opensfdi.devices import board
 from opensfdi.phase import unwrap
 from opensfdi.services import FileImageRepo, FileCameraConfigRepo, FileProjectorRepo, save_pointcloud

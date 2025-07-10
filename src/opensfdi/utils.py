@@ -22,6 +22,7 @@ def stdout_redirected(to=os.devnull):
         finally:
             _redirect_stdout(to=old_stdout)
 
+
 #     def to_stl(self, heightmap):
 #         # Create vertices from the heightmap
 #         vertices = []

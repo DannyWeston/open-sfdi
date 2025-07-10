@@ -3,7 +3,6 @@ import cv2
 import re
 import json
 import numpy as np
-import struct
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -13,21 +12,6 @@ from .devices import camera, projector, vision
 
 from . import reconstruction as recon
 from .image import FileImage, Image, ToF32
-
-# Misc
-
-def save_pointcloud(filename: Path, arr: np.ndarray):
-  with open(filename, "wb") as file:
-    file.write(bytes('ply\n', 'utf-8'))
-    file.write(bytes('format binary_little_endian 1.0\n', 'utf-8'))
-    file.write(bytes(f'element vertex {arr.shape[0]}\n', 'utf-8'))
-    file.write(bytes(f'property float x\n', 'utf-8'))
-    file.write(bytes(f'property float y\n', 'utf-8'))
-    file.write(bytes(f'property float z\n', 'utf-8'))
-    file.write(bytes(f'end_header\n', 'utf-8'))
-
-    for i in range(arr.shape[0]):
-      file.write(bytearray(struct.pack("fff", arr[i, 0], arr[i, 1], arr[i, 2])))
 
 
 # Repositories
@@ -59,19 +43,124 @@ class IRepository(ABC, Generic[T]):
         raise NotImplementedError
 
 
-# Camera repository
+# Vision Repositories
 
-class BaseCameraConfigRepo(IRepository[camera.CameraConfig]):
+class VisionConfigRepo(IRepository[vision.VisionConfig]):
     @abstractmethod
     def __init__(self, overwrite=False):
         self.m_Overwrite = overwrite
 
     @abstractmethod
-    def Get(self, id: str) -> camera.CameraConfig:
+    def Get(self, id: str) -> vision.VisionConfig:
         pass
 
     @abstractmethod
-    def GetBy(self, regex, sorted) -> Iterator[camera.CameraConfig]:
+    def GetBy(self, regex, sorted) -> Iterator[vision.VisionConfig]:
+        pass
+
+    @abstractmethod
+    def Find(self, regex: str, sorted) -> list[str]:
+        pass
+
+    @abstractmethod
+    def Add(self, config: vision.VisionConfig, id: str) -> None:
+        pass
+
+    @abstractmethod
+    def Delete(self, id: str) -> bool:
+        pass
+
+    @abstractmethod
+    def Update(self, config: vision.VisionConfig) -> bool:
+        pass
+
+class FileVisionConfigRepo(VisionConfigRepo):
+    def __init__(self, storageDir: Path, overwrite=False):
+        super().__init__(overwrite=overwrite)
+
+        self.m_StorageDir = storageDir
+
+    def Get(self, id: str) -> vision.VisionConfig:
+        found = self.Find(id, sorted=False)
+
+        if len(found) < 1:
+            raise Exception(f"Vision config with name '{id}' could not be found on disk")
+
+        vc = self.__LoadConfig(id)
+
+        if vc: return vc
+        
+        raise Exception("Could not construct vision config")
+
+    def GetBy(self, regex, sorted) -> Iterator[vision.VisionConfig]:
+        yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
+
+    def Find(self, regex: str, sorted) -> list[str]:
+        files = [file.stem for file in self.m_StorageDir.glob("*.json")]
+
+        files = list(filter(lambda name: re.match(regex, name), files))
+
+        if sorted: files.sort()
+
+        return files
+
+    def Add(self, config: vision.VisionConfig, id: str) -> None:
+        found = self.Find(id, False)
+
+        if 0 < len(found) and (not self.m_Overwrite):
+            raise Exception(f"{id} already exists and cannot be saved (overwriting disabled)")
+
+        # Save metadata
+        with open(self.m_StorageDir / f"{id}.json", "w") as jsonFile:
+            data = {
+                "IntrinsicMat"      : config.intrinsicMat.tolist(),
+                "Rotation"          : config.rotation.tolist(),
+                "Translation"       : config.translation.tolist(),
+                "DistortMat"        : config.distortMat.tolist(),
+                "ReprojErr"         : config.reprojErr,
+                "TargetResolution"  : list(config.targetResolution),
+                "PosePOICoords"     : config.posePOICoords.tolist()
+            }
+
+            json.dump(data, jsonFile, indent=2)
+
+    def Delete(self, id: str) -> bool:
+        # TODO: Implement
+        pass
+
+    def Update(self, config: vision.VisionConfig) -> bool:
+        # TODO: Implement
+        pass
+
+    def __LoadConfig(self, name):
+        with open(self.m_StorageDir / f"{name}.json", "r") as jsonFile:
+            rawJson = json.load(jsonFile)
+
+        # Camera is characterised so make calibrated config
+        return vision.VisionConfig(
+            rotation=np.array(rawJson["Rotation"]),
+            translation=np.array(rawJson["Translation"]),
+            intrinsicMat=np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
+            distortMat=np.array(rawJson["DistortMat"]),
+            reprojErr=rawJson["ReprojErr"],
+            targetResolution=rawJson["TargetResolution"],
+            posePOICoords=np.array(rawJson["PosePOICoords"])
+        )
+
+
+# Camera Repositories
+
+class BaseCameraConfigRepo(IRepository[vision.VisionConfig]):
+    @abstractmethod
+    def __init__(self, overwrite=False):
+        self.m_Overwrite = overwrite
+
+    @abstractmethod
+    def Get(self, id: str) -> vision.VisionConfig:
+        pass
+
+    @abstractmethod
+    def GetBy(self, regex, sorted) -> Iterator[vision.VisionConfig]:
         pass
 
     @abstractmethod
@@ -133,16 +222,6 @@ class FileCameraConfigRepo(BaseCameraConfigRepo):
                 "Channels"      : config.channels
             }
 
-            if isinstance(config, camera.CalibratedCameraConfig):
-                vc = config.visionConfig
-                data["IntrinsicMat"]        = vc.intrinsicMat.tolist()
-                data["Rotation"]            = vc.rotation.tolist()
-                data["Translation"]         = vc.translation.tolist()
-                data["DistortMat"]          = vc.distortMat.tolist()
-                data["ReprojErr"]           = vc.reprojErr
-                data["TargetResolution"]    = list(vc.targetResolution)
-                data["PosePOICoords"]       = vc.posePOICoords.tolist()
-
             json.dump(data, jsonFile, indent=2)
 
     def Delete(self, id: str) -> bool:
@@ -157,26 +236,10 @@ class FileCameraConfigRepo(BaseCameraConfigRepo):
         with open(self.m_StorageDir / f"{name}.json", "r") as jsonFile:
             rawJson = json.load(jsonFile)
 
-        if not rawJson["IntrinsicMat"]:
-            return camera.CameraConfig(
-                tuple(rawJson["Resolution"]), rawJson["Channels"], 
-            )
-
-        # Camera is characterised so make calibrated config
-        visionConfig = vision.VisionConfig(
-            rotation=np.array(rawJson["Rotation"]),
-            translation=np.array(rawJson["Translation"]),
-            intrinsicMat=np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
-            distortMat=np.array(rawJson["DistortMat"]),
-            reprojErr=rawJson["ReprojErr"],
-            targetResolution=rawJson["TargetResolution"],
-            posePOICoords=np.array(rawJson["PosePOICoords"])
-        )
-
-        return camera.CalibratedCameraConfig(
+        return camera.CameraConfig(
             tuple(rawJson["Resolution"]), rawJson["Channels"], 
-            visionConfig=visionConfig
         )
+
 
 # Projector Repositories
 
@@ -254,16 +317,6 @@ class FileProjectorRepo(BaseProjectorConfigRepo):
                 "PixelSize"     : config.pixelSize
             }
 
-            if isinstance(config, projector.CalibratedProjectorConfig):
-                vc = config.visionConfig
-                data["Rotation"]            = vc.rotation.tolist()
-                data["Translation"]         = vc.translation.tolist()
-                data["IntrinsicMat"]        = vc.intrinsicMat.tolist()
-                data["DistortMat"]          = vc.distortMat.tolist()
-                data["ReprojErr"]           = vc.reprojErr
-                data["TargetResolution"]    = list(vc.targetResolution)
-                data["PosePOICoords"]       = vc.posePOICoords.tolist()
-
             json.dump(data, json_file, indent=2)
 
     def Delete(self, id: str) -> bool:
@@ -278,27 +331,9 @@ class FileProjectorRepo(BaseProjectorConfigRepo):
         with open(self.m_StorageDir / f"{name}.json", "r") as jsonFile:
             rawJson = json.load(jsonFile)
 
-            if not rawJson["IntrinsicMat"]:
-                return projector.ProjectorConfig(
-                    tuple(rawJson["Resolution"]), rawJson["Channels"],
-                    rawJson["ThrowRatio"], rawJson["PixelSize"]
-                )
-
-            # Projector is characterised so make calibrated config
-            visionConfig = vision.VisionConfig(
-                rotation=np.array(rawJson["Rotation"]),
-                translation=np.array(rawJson["Translation"]),
-                intrinsicMat=np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
-                distortMat=np.array(rawJson["DistortMat"]),
-                reprojErr=rawJson["ReprojErr"],
-                targetResolution=rawJson["TargetResolution"],
-                posePOICoords=np.array(rawJson["PosePOICoords"])
-            )
-
-            return projector.CalibratedProjectorConfig(
+            return projector.ProjectorConfig(
                 tuple(rawJson["Resolution"]), rawJson["Channels"],
-                rawJson["ThrowRatio"], rawJson["PixelSize"],
-                visionConfig
+                rawJson["ThrowRatio"], rawJson["PixelSize"]
             )
 
 

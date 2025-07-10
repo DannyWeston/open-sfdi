@@ -53,18 +53,6 @@ class VisionConfig:
     def projectionMat(self) -> np.ndarray:
         return np.dot(self.intrinsicMat, self.extrinsicMat)
 
-class IVisionCharacterised(ABC):
-    @property
-    @abstractmethod
-    def visionConfig(self) -> VisionConfig:
-        raise NotImplementedError
-    
-    @visionConfig.setter
-    @abstractmethod
-    def visionConfig(self, value: VisionConfig):
-        raise NotImplementedError
-
-
 class IntensityConfig:
     def __init__(self, minIntensity, maxIntensity, coeffs, sampleCount):
         self.m_MinIntensity = minIntensity
@@ -95,13 +83,12 @@ class IIntensityCharacterised(ABC):
     @abstractmethod
     def intensityConfig(self) -> IntensityConfig:
         raise NotImplementedError
-    
-def RefineDevices(device1: IVisionCharacterised, device2: IVisionCharacterised, worldCoords):
+
+def RefineDevices(vc1: VisionConfig, vc2: VisionConfig, worldCoords):
     flags = 0
     flags |= cv2.CALIB_FIX_INTRINSIC
-
-    vc1 = device1.visionConfig
-    vc2 = device2.visionConfig
+    # flags |= cv2.CALIB_FIX_K3
+    # flags |= cv2.CALIB_USE_INTRINSIC_GUESS
 
     reprojErr, K1, D1, K2, D2, R, T, E, F = cv2.stereoCalibrate(
         worldCoords, vc1.posePOICoords, vc2.posePOICoords,
@@ -115,7 +102,4 @@ def RefineDevices(device1: IVisionCharacterised, device2: IVisionCharacterised, 
         K2, D2, vc2.reprojErr, vc2.targetResolution, vc2.posePOICoords)
 
     # Update vision configs of devices
-    device1.visionConfig = newVC1
-    device2.visionConfig = newVC2
-
-    return reprojErr
+    return newVC1, newVC2, reprojErr

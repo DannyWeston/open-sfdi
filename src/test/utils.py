@@ -1,8 +1,12 @@
-from opensfdi.devices import projector
+from opensfdi.devices import projector, vision
+
+from pathlib import Path
+
+DATA_ROOT = Path("D:\\results")
 
 class FakeFPProjector(projector.FringeProjector):
-    def __init__(self, config: projector.ProjectorConfig, stripeRotation=0.0, phase=0.0, numStripes=0.0):
-        super().__init__(config, stripeRotation, phase, numStripes)
+    def __init__(self, config: projector.ProjectorConfig, visionConfig:vision.VisionConfig=None):
+        super().__init__(config, visionConfig=visionConfig)
 
     def Display(self):
         # Do nothing

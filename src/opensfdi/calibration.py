@@ -1,12 +1,10 @@
-import cv2
 import numpy as np
 import time
-
 
 from abc import ABC, abstractmethod
 from numpy.polynomial import polynomial as P
 
-from .image import Show, DC
+from .image import DC
 from .phase import unwrap, shift
 from .devices import camera, projector, board, vision
 
@@ -19,10 +17,10 @@ class FPCalibrator(ABC):
         pass
 
 class StereoCalibrator(FPCalibrator):
-    def __init__(self, calib_board: board.CalibrationBoard):
+    def __init__(self, calibBoard: board.CalibrationBoard):
         super().__init__()
 
-        self.m_CalibBoard = calib_board
+        self.m_CalibBoard = calibBoard
 
     def GatherPhaseMap(self, camera: camera.Camera, projector: projector.FringeProjector, shifter: shift.PhaseShift, phi_unwrap: unwrap.PhaseUnwrap):
         # TODO: Add some flag to save the images whilst gathering?
@@ -39,39 +37,38 @@ class StereoCalibrator(FPCalibrator):
 
             if j == 0: dcImage = DC(imgs)
 
-            shifted[j] = shifter.shift(imgs)
+            shifted[j] = shifter.Shift(imgs)
 
         # Calculate unwrapped phase maps
-        return phi_unwrap.unwrap(shifted), dcImage
+        return phi_unwrap.Unwrap(shifted), dcImage
     
     def GatherDC(self, camera: camera.Camera, projector: projector.FringeProjector):
         # Gather a single full intensity DC img
         return FringeProject(camera, projector, 0.0, [0.0])[0]
 
     def Calibrate(self, camera: camera.Camera, projector: projector.FringeProjector, shifter: shift.PhaseShift, unwrapper: unwrap.PhaseUnwrap, imageCount=15):
-        start_time = time.time()
+        startTime = time.time()
 
         camShape = camera.config.shape
 
         phasemaps = np.empty(shape=(imageCount * 2, *camShape), dtype=np.float32) 
-        dc_imgs = np.empty(shape=(imageCount, *camShape), dtype=np.float32)
+        dcImages = np.empty(shape=(imageCount, *camShape), dtype=np.float32)
 
         for i in range(imageCount):
             # Vertical phase maps
             projector.stripeRotation = 0.0
-            phasemaps[2*i], dc_imgs[i] = self.GatherPhaseMap(camera, projector, shifter, unwrapper)
-            # phase.show_phasemap(phasemaps[2*i])
-            # show_image(dc_imgs[i])
+            phasemaps[2*i], dcImages[i] = self.GatherPhaseMap(camera, projector, shifter, unwrapper)
+            # ShowPhasemap(phasemaps[2*i])
             
             # Horizontal phase maps (ignore DC image as we don't need it)
             projector.stripeRotation = np.pi / 2.0
             phasemaps[2*i+1], _ = self.GatherPhaseMap(camera, projector, shifter, unwrapper)
-            # phase.show_phasemap(phasemaps[2*i+1])
+            # ShowPhasemap(phasemaps[2*i+1])
 
         # Calibrate the camera and projector
-        self.__Calibrate(camera, projector, dc_imgs, phasemaps, numStripes=unwrapper.GetFringeCount()[-1])
+        self.__Calibrate(camera, projector, dcImages, phasemaps, numStripes=unwrapper.GetFringeCount()[-1])
 
-        end_time = (time.time() - start_time) * 1000
+        end_time = (time.time() - startTime) * 1000
 
         result = CalibrationResult()
         result.time_taken = end_time
@@ -80,7 +77,7 @@ class StereoCalibrator(FPCalibrator):
 
         return result
 
-    def __Calibrate(self, cam: camera.Camera, proj: projector.FringeProjector, boardImages, phasemaps: np.ndarray, numStripes) -> recon.StereoProfil:
+    def __Calibrate(self, cam: camera.Camera, proj: projector.FringeProjector, boardImages, phasemaps: np.ndarray, numStripes) -> recon.StereoReconstructor:
         """ The triangular stereo calibration model for fringe projection setups. """
 
         N = len(boardImages)
@@ -108,22 +105,21 @@ class StereoCalibrator(FPCalibrator):
             validPhasemaps.append(phasemaps[2*i])
             validPhasemaps.append(phasemaps[2*i+1])
 
-            # DEBUG: Draw corners detected
-            # show_image(cv2.drawChessboardCorners(cb_imgs[i], self.__cb_size, corners, True))
-
         worldCoords = np.array(worldCoords)
         cameraCoords = np.array(cameraCoords)
 
-        # Finished phase manipulation, now just need to calibrate camera and projector
+        # Finished phase manipulation, now just need to jointly calibrate camera and projector
         print(f"{len(cameraCoords)} images with POIs correctly identified")
 
-        cam.config = cam.Calibrate(worldCoords, cameraCoords)
-        proj.config = proj.Calibrate(worldCoords, cameraCoords, validPhasemaps, numStripes)
+        # Characterise camera and projector individually
+        cam.Calibrate(worldCoords, cameraCoords)
+        proj.Calibrate(worldCoords, cameraCoords, validPhasemaps, numStripes)
 
-        print(f"Camera reprojection error: {cam.config.visionConfig.reprojErr}")
-        print(f"Projector reprojection error: {proj.config.visionConfig.reprojErr}")
+        print(f"Camera reprojection error: {cam.visionConfig.reprojErr}")
+        print(f"Projector reprojection error: {proj.visionConfig.reprojErr}")
 
-        reprojErr = vision.RefineDevices(cam.config, proj.config, worldCoords)
+        # Refine the characterisations using each other
+        cam.visionConfig, proj.visionConfig, reprojErr = vision.RefineDevices(cam.visionConfig, proj.visionConfig, worldCoords)
         print(f"Total reprojection error: {reprojErr}")
 
         # TODO: Use
@@ -179,10 +175,6 @@ class CalibrationResult:
 
         self.number_of_calibration_images = None
 
-class MeasurementResult:
-    def __init__(self):
-        self.time_taken = None
-
 # Utility functions
 
 def checkerboard_centre(cb_size, square_size):
@@ -200,7 +192,7 @@ def FringeProject(camera: camera.Camera, projector: projector.FringeProjector, s
     for i in range(N):
         projector.phase = phases[i]
         projector.Display()
-        imgs[i] = camera.Capture().raw_data
+        imgs[i] = camera.Capture().rawData
         # imgs[i] = add_gaussian(imgs[i], sigma=0.1)
 
     return imgs

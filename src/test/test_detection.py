@@ -16,7 +16,7 @@ def test_main():
     i = 0
     while len(imgs) != 0:
 
-        xs = [img.raw_data for img in imgs[:12]]
+        xs = [img.rawData for img in imgs[:12]]
 
         dc_img = image.DC(xs)
 

@@ -3,7 +3,8 @@ import cv2
 
 from abc import ABC, abstractmethod
 
-from .vision import VisionConfig, IVisionCharacterised, IIntensityCharacterised
+from .vision import VisionConfig
+from ..image import Show
 
 class ProjectorConfig:
     def __init__(self, resolution=(720, 1280), channels=1, throwRatio=1.0, pixelSize=1.0):
@@ -35,26 +36,14 @@ class ProjectorConfig:
             return self.resolution
         
         return (*self.resolution, self.channels)
-    
-class CalibratedProjectorConfig(ProjectorConfig, IVisionCharacterised):
-    def __init__(self, resolution, channels, throwRatio, pixelSize, visionConfig: VisionConfig):
-        super().__init__(resolution, channels, throwRatio, pixelSize)
-
-        self.m_VisionConfig = visionConfig
-
-    @property
-    def visionConfig(self) -> VisionConfig:
-        return self.m_VisionConfig
-    
-    @visionConfig.setter
-    def visionConfig(self, value: VisionConfig):
-        # TODO: Maybe add callback?
-        self.m_VisionConfig = value
 
 class Projector(ABC):
     @abstractmethod
-    def __init__(self, config: ProjectorConfig):
+    def __init__(self, config: ProjectorConfig, visionConfig:VisionConfig=None):
         self.m_Config = config
+
+        self.m_ShouldUndistort = False
+        self.m_VisionConfig = visionConfig
 
     @property
     def config(self):
@@ -65,8 +54,25 @@ class Projector(ABC):
         # TODO: Maybe add a callback?
         self.m_Config = value
 
+    @property
+    def visionConfig(self) -> VisionConfig:
+        return self.m_VisionConfig
+    
+    @visionConfig.setter
+    def visionConfig(self, value: VisionConfig):
+        # TODO: Maybe add callback?
+        self.m_VisionConfig = value
+
+    @property
+    def shouldUndistort(self) -> bool:
+        return self.m_ShouldUndistort
+    
+    @shouldUndistort.setter
+    def shouldUndistort(self, value):
+        self.m_ShouldUndistort = value
+
     @abstractmethod
-    def Calibrate(self) -> CalibratedProjectorConfig:
+    def Calibrate(self) -> bool:
         raise NotImplementedError
 
     @abstractmethod
@@ -74,8 +80,8 @@ class Projector(ABC):
         raise NotImplementedError
 
 class FringeProjector(Projector):
-    def __init__(self, config: ProjectorConfig, stripeRotation=0.0, phase=0.0, numStripes=0.0):
-        super().__init__(config)
+    def __init__(self, config: ProjectorConfig, visionConfig: VisionConfig=None, stripeRotation=0.0, phase=0.0, numStripes=0.0):
+        super().__init__(config, visionConfig=visionConfig)
 
         self.m_StripeRotation = stripeRotation
         self.m_Phase = phase
@@ -110,6 +116,8 @@ class FringeProjector(Projector):
     def PhaseMatch(self, worldCoords, vertPhasemap, horiPhasemap, numStripes) -> np.ndarray:
         N = worldCoords.shape[0]
 
+        h, w = self.config.resolution
+
         projCoords = np.empty((N, 2), dtype=np.float32)
         
         for i in range(N):
@@ -129,7 +137,7 @@ class FringeProjector(Projector):
             vertPhase = (1 - yFrac) * ((1 - xFrac) * vertPhase1 + xFrac * vertPhase2) + \
                 yFrac * ((1 - xFrac) * vertPhase3 + xFrac * vertPhase4)
 
-            projCoords[i, 0] = (vertPhase) / (2.0 * np.pi * numStripes)
+            projCoords[i, 0] = (vertPhase * w) / (2.0 * np.pi * numStripes)
 
             horiPhase1 = horiPhasemap[yInt, xInt]
             horiPhase2 = horiPhasemap[yInt, xInt + 1]
@@ -139,11 +147,11 @@ class FringeProjector(Projector):
             horiPhase = (1 - yFrac) * ((1 - xFrac) * horiPhase1 + xFrac * horiPhase2) + \
                 yFrac * ((1 - xFrac) * horiPhase3 + xFrac * horiPhase4)
 
-            projCoords[i, 1] = (horiPhase) / (np.pi * 2.0 * numStripes)
+            projCoords[i, 1] = (horiPhase * h) / (np.pi * 2.0 * numStripes)
 
         return projCoords
 
-    def Calibrate(self, worldCoords, cameraCoords, phasemaps, numStripes) -> CalibratedProjectorConfig:
+    def Calibrate(self, worldCoords, cameraCoords, phasemaps, numStripes) -> bool:
         h, w = self.config.resolution
 
         pixelCoords = np.empty_like(cameraCoords)
@@ -152,34 +160,53 @@ class FringeProjector(Projector):
         for i in range(len(worldCoords)):
             pixelCoords[i] = self.PhaseMatch(cameraCoords[i], phasemaps[2*i], phasemaps[2*i+1], numStripes)
 
+        # for coords in pixelCoords:
+        #     cornersImage = cv2.drawChessboardCorners(np.zeros(self.config.resolution, dtype=np.float32), (4, 13), coords, True) 
+        #     cornersImage = cv2.circle(cornersImage, coords[0].astype(int), 10, 255, -1)
+        #     Show(cornersImage)
+
+        sensorWidth     = 9.962108389 # mm
+        sensorHeight    = 5.603685969 # mm
+        focalX = (3.6 / sensorWidth) * w # mm
+        focalY = focalX # TODO: Incorporate pixelSize for camera
+
         # Optical centre in the middle, focal length in pixels equal to resolution
         K_guess = np.array([
-            [self.config.throwRatio * w, 0.0, w / 2],
-            [0.0, self.config.throwRatio * self.config.pixelSize * h, h / 2],
-            [0.0, 0.0, 1.0]
+            [focalX,    0.0,        w / 2],
+            [0.0,       focalY,     h / 2],
+            [0.0,       0.0,        1.0]
         ])
 
         flags = 0
-        # flags |= cv2.CALIB_FIX_K3
-        flags |= cv2.CALIB_USE_INTRINSIC_GUESS
+        # flags |= cv2.CALIB_USE_INTRINSIC_GUESS
+        flags |= cv2.CALIB_FIX_PRINCIPAL_POINT
 
-        reprojErr, K, D, R, T = cv2.calibrateCamera(worldCoords, pixelCoords, (w, h), K_guess, None, flags=flags)
+        flags |= cv2.CALIB_FIX_K3
+        flags |= cv2.CALIB_FIX_K4
+        flags |= cv2.CALIB_FIX_K5
+
+        reprojErr, K, D, R, T = cv2.calibrateCamera(worldCoords, pixelCoords, (w, h), None, None, flags=flags)
         
         # Calculate projector intrinsic matrix
 
-        visionConfig = VisionConfig(
+        self.visionConfig = VisionConfig(
             rotation=cv2.Rodrigues(R[0])[0], translation=T[0], 
             intrinsicMat=K, distortMat=D, reprojErr=reprojErr,
             targetResolution=(h, w), posePOICoords=pixelCoords
         )
 
-        config = CalibratedProjectorConfig(
-            self.config.resolution, self.config.channels, 
-            self.config.throwRatio, self.config.pixelSize, visionConfig
-        )
+        # errors = []
+        # for i in range(len(worldCoords)):
+        #     points, _ = cv2.projectPoints(
+        #         worldCoords[i], R[i], T[i], K, D
+        #     )
+        #     error = cv2.norm(pixelCoords[i], points.reshape(-1, 2), cv2.NORM_L2) / len(points)
+        #     errors.append(error)
 
-        return config
+        # print(np.array(errors))
 
+        return True
+  
     @abstractmethod
     def Display(self):
         raise NotImplementedError
