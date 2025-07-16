@@ -84,7 +84,7 @@ class IIntensityCharacterised(ABC):
     def intensityConfig(self) -> IntensityConfig:
         raise NotImplementedError
 
-def RefineDevices(vc1: VisionConfig, vc2: VisionConfig, worldCoords):
+def RefineCharacterisations(vc1: VisionConfig, vc2: VisionConfig, worldCoords):
     flags = 0
     flags |= cv2.CALIB_FIX_INTRINSIC
     # flags |= cv2.CALIB_FIX_K3
@@ -95,7 +95,7 @@ def RefineDevices(vc1: VisionConfig, vc2: VisionConfig, worldCoords):
         vc1.intrinsicMat, vc1.distortMat, vc2.intrinsicMat, vc2.distortMat,
         vc1.targetResolution, flags=flags)
     
-    newVC1 = VisionConfig(vc1.rotation, vc1.translation, 
+    newVC1 = VisionConfig(vc1.rotation, vc1.translation,
         K1, D1, vc1.reprojErr, vc1.targetResolution, vc1.posePOICoords)
     
     newVC2 = VisionConfig(np.dot(R, vc1.rotation), np.dot(R, vc1.translation) + T,

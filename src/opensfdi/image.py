@@ -7,6 +7,8 @@ from abc import ABC
 
 from .devices.vision import VisionConfig
 
+from .utils import ProcessingContext, AlwaysNumpy
+
 class Image(ABC):
     def __init__(self, data: np.ndarray):
         self.m_RawData = data
@@ -17,25 +19,16 @@ class Image(ABC):
 
 # Images can be lazy loaded making use of lazy loading pattern
 class FileImage(Image):
-    def __init__(self, path: Path, channels=1):
+    def __init__(self, path: Path):
         super().__init__(None)
 
         self.m_Path: Path = path
-
-        self.m_Channels = channels
 
     @property
     def rawData(self) -> np.ndarray:
         # Check if the data needs to be loaded
         if self.m_RawData is None:
-            flags = None
-            if self.m_Channels == 3:
-                flags = cv2.IMREAD_COLOR
-
-            elif self.m_Channels == 1:
-                flags = cv2.IMREAD_GRAYSCALE
-
-            self.m_RawData = cv2.imread(str(self.m_Path.resolve()), flags)
+            self.m_RawData = cv2.imread(str(self.m_Path.resolve()), flags=cv2.IMREAD_UNCHANGED)
             self.m_RawData = self.m_RawData.astype(np.float32) / 255.0 # Default to float32
 
         return self.m_RawData
@@ -82,27 +75,19 @@ def ToU8(rawData) -> np.ndarray:
     return (rawData * 255.0).astype(np.uint8)
 
 def ThresholdMask(rawData, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
-    success, result = cv2.threshold(rawData, threshold, max, type)
+    success, result = cv2.threshold(AlwaysNumpy(rawData), threshold, max, type)
 
     if not success: return None
     
     return result
 
-def CalculateModulation(imgs, phases):
-    N = len(phases)
-
-    a = np.zeros_like(imgs[0])
-    b = np.zeros_like(a)
-
-    for i, phase in enumerate(phases):
-        a += np.square(imgs[i] * np.sin(phase))
-        b += np.square(imgs[i] * np.cos(phase))
-
-    return (2.0 / N) * np.sqrt(a + b)
-
-def DC(imgs) -> np.ndarray:
+def DC(imgs):
+    xp = ProcessingContext().xp
+    
     """ Calculate average intensity across supplied imgs (return uint8 format)"""
-    return np.sum(imgs, axis=0, dtype=np.float32) / len(imgs)
+    imgs = xp.asarray(imgs)
+
+    return xp.sum(imgs, axis=0, dtype=np.float32) / len(imgs)
 
 def CalculateVignette(rawData: np.ndarray, expectedMax=None):
     if expectedMax is None: expectedMax = rawData.max()
@@ -124,11 +109,14 @@ def CalculateGamma(rawData: np.ndarray, kernel=(9, 16)):
 
     return np.mean(roi)
 
-def Show(rawData: np.ndarray, name='Image', wait=0):
+def Show(rawData, name='Image', wait=0, size=None):
+    # cv2 needs numpy
+    rawData = AlwaysNumpy(rawData)
+
     if cv2.getWindowProperty(name, cv2.WND_PROP_VISIBLE) < 0:
         cv2.namedWindow(name, cv2.WINDOW_NORMAL)
     
-    cv2.imshow(name, rawData)
+    cv2.imshow(name, rawData if size is None else cv2.resize(rawData, size))
     cv2.waitKey(wait)
 
 def ShowScatter(xss, yss):

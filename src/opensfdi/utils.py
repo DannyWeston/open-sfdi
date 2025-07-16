@@ -1,5 +1,6 @@
 import os
 import sys
+
 import numpy as np
 
 from contextlib import contextmanager
@@ -22,54 +23,56 @@ def stdout_redirected(to=os.devnull):
         finally:
             _redirect_stdout(to=old_stdout)
 
-
-#     def to_stl(self, heightmap):
-#         # Create vertices from the heightmap
-#         vertices = []
-#         for y in range(heightmap.shape[0]):
-#             for x in range(heightmap.shape[1]):
-#                 vertices.append([x, y, heightmap[y, x]])
-
-#         vertices = np.array(vertices)
-
-#         # Create faces for the mesh
-#         faces = []
-#         for y in range(heightmap.shape[0] - 1):
-#             for x in range(heightmap.shape[1] - 1):
-#                 v1 = x + y * heightmap.shape[1]
-#                 v2 = (x + 1) + y * heightmap.shape[1]
-#                 v3 = x + (y + 1) * heightmap.shape[1]
-#                 v4 = (x + 1) + (y + 1) * heightmap.shape[1]
-
-#                 # First triangle
-#                 faces.append([v1, v2, v3])
-#                 # Second triangle
-#                 faces.append([v2, v4, v3])
-
-#         # Create the mesh object
-#         # mesh_data = mesh.Mesh(np.zeros(len(faces), dtype=mesh.Mesh.dtype))
-#         # for i, f in enumerate(faces):
-#         #     for j in range(3):
-#         #         mesh_data.vectors[i][j] = vertices[f[j]]
-
-#         # mesh_data.save('heightmap_mesh.stl')
-
-def makeGreyFringes(frequency, phase, orientation, resolution=(1024, 1024)):
-    w, h = resolution
+class ProcessingContext:
+    __Instance = None
     
-    x, y = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    def __new__(cls):
+        if cls.__Instance is None:
+            cls.__Instance = super().__new__(cls)
+            cls.__Instance.UseGPU = False
+            cls.__Instance.m_Processor = np
 
-    g = np.sin(orientation) * x - np.cos(orientation) * y
+        return cls.__Instance
+    
+    @classmethod
+    @contextmanager
+    def UseGPU(cls, value=False):
+        instance = cls()
+        previous = instance.UseGPU
+        
+        try:
+            instance.UseGPU = value
+            yield instance
 
-    return (np.cos((2.0 * np.pi * g * frequency) - phase) + 1.0) / 2.0
+        finally:
+            instance.UseGPU = previous
 
-def makeRGBFringes(frequency, phase, orientation, resolution=(1024, 1024), rgb=[1.0, 1.0, 1.0]):
-    w, h = resolution
+    @property
+    def xp(self):
+        if self.UseGPU:
+            if self.m_Processor != np: return self.m_Processor
+            
+            try:
+                import cupy as cp
+                self.m_Processor = cp
+                
+                return self.m_Processor
+            
+            except ImportError:
+                raise ImportError("GPU processing is not available as cupy is not installed")
+        
+        self.m_Processor = np
+        return self.m_Processor
 
-    img = np.empty((3, h, w), dtype=np.float32)
+    def __str__(self):
+        return f"ProcessingContext(UseGPU={self.UseGPU}"
 
-    img[2] = makeGreyFringes(frequency, phase, orientation, resolution) * rgb[0]
-    img[1] = makeGreyFringes(frequency, phase, orientation, resolution) * rgb[1]
-    img[0] = makeGreyFringes(frequency, phase, orientation, resolution) * rgb[2]
-
-    return img
+def AlwaysNumpy(arr):
+    if type(arr) == np.ndarray:
+        return arr
+    
+    with ProcessingContext.UseGPU(True):
+        return arr.get()
+    
+    # We should only get to this point if the type provided is incorrect
+    raise Exception("Incorrect type provided (must be numpy or cupy array)")

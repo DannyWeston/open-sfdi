@@ -9,7 +9,7 @@ readme = "README.md"
 python = "3.11.7"
 matplotlib = "^3.9.1"
 scipy = "^1.14.0"
-numpy = "^2.0.1"
+numpy = "1.26"
 imageio = "^2.34.2"
 opencv-python = "^4.10.0.84"
 pillow = "^10.4.0"
@@ -17,10 +17,14 @@ scikit-learn = "^1.5.1"
 scikit-image = "^0.24.0"
 pydantic = "^2.9.2"
 open3d = "^0.19.0"
+cupy-cuda12x = {version="^13.0", optional=true }
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
 memory-profiler = "^0.61.0"
+
+[tool.poetry.extras]
+gpu = ["cupy-cuda12x"]
 
 [build-system]
 requires = ["poetry-core"]

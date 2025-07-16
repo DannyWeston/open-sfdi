@@ -65,7 +65,7 @@ def test_calibration():
 
     shifter = unwrap.NStepPhaseShift(shift_mask=shift_mask)
     unwrapper = unwrap.MultiFreqPhaseUnwrap(fringe_counts)
-    calibrator = calibration.StereoCalibrator(calib_board)
+    calibrator = calibration.StereoCharacteriser(calib_board)
 
     for phase_count in phase_counts:
         # Set correct phase count
@@ -73,10 +73,10 @@ def test_calibration():
 
         # Set correct camera images
         phase_path = exp_root / str(phase_count)
-        img_repo = FileImageRepo(phase_path, fileExt='.tif')
+        img_repo = FileImageRepo(phase_path, useExt='.tif')
         camera.imgs = list(img_repo.GetBy("calibration", sorted=True))
 
-        calibrator.Calibrate(camera, projector, shifter, unwrapper, imageCount=orientations)
+        calibrator.Characterise(camera, projector, shifter, unwrapper, poseCount=orientations)
 
         # Save the experiment information and the calibrated camera / projector
         cam_repo = FileCameraConfigRepo(phase_path, overwrite=True)
@@ -108,7 +108,7 @@ def test_measurement():
   
   cam_repo = FileCameraConfigRepo(calib_path, overwrite=True)
   camera: board.FileCamera = cam_repo.Get("camera")
-  img_repo = FileImageRepo(calib_path, fileExt='.tif', channels=camera.channels)
+  img_repo = FileImageRepo(calib_path, useExt='.tif', channels=camera.channels)
 
   proj_repo = FileProjectorRepo(calib_path, overwrite=True)
   projector: board.FakeProjector = proj_repo.Get("projector")

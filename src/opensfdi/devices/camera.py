@@ -4,6 +4,7 @@ import cv2
 from abc import ABC, abstractmethod
 
 from .vision import VisionConfig
+
 from .. import image
 
 class CameraConfig:
@@ -59,16 +60,12 @@ class Camera(ABC):
     def shouldUndistort(self, value):
         self.m_ShouldUndistort = value
 
-    def Calibrate(self, worldCoords, pixelCoords):
+    def Characterise(self, worldCoords, pixelCoords):
         h, w = self.config.resolution
 
         flags = 0
         flags |= cv2.CALIB_FIX_K3
         flags |= cv2.CALIB_USE_INTRINSIC_GUESS
-
-        # Optical centre in the middle, focal length in pixels equal to resolution
-        # 1,838.2978723404255319148936170213
-        # 1,418.9781021897810218978102189781
 
         sensorWidth = 3.76 # mm
         focalX = (3.6 / sensorWidth) * w # mm
@@ -80,7 +77,9 @@ class Camera(ABC):
             [0.0,           0.0,    1.0]
         ])
 
-        reprojErr, K, D, R, T = cv2.calibrateCamera(worldCoords, pixelCoords, (w, h), kGuess, None, flags=flags)
+        reprojErr, K, D, R, T = cv2.calibrateCamera(
+            worldCoords, pixelCoords, (w, h), kGuess, None, flags=flags
+        )
 
         self.visionConfig = VisionConfig(
             rotation=cv2.Rodrigues(R[0])[0], translation=T[0], 

@@ -2,7 +2,11 @@ import numpy as np
 import cv2
 
 from abc import ABC, abstractmethod
+
+from ..utils import AlwaysNumpy
+
 from .. import image
+
 
 # CalibrationBoard
 
@@ -67,7 +71,7 @@ class Checkerboard(CalibrationBoard):
         return corners
 
 class CircleBoard(CalibrationBoard):
-    def __init__(self, circleSpacing = (0.0, 0.03), circleDiameter=1.0, poiCount=(4, 13), inverted=True, staggered=True, areaHint=None):
+    def __init__(self, circleSpacing=(0.03, 0.03), circleDiameter=1.0, poiCount=(4, 13), inverted=True, staggered=True, areaHint=None):
         super().__init__()
         # TODO: Maybe make separate immutable classes for staggered and unstaggered?
         
@@ -97,7 +101,9 @@ class CircleBoard(CalibrationBoard):
 
         self.m_DetectorParams.blobColor = 255 if inverted else 0
 
-    def FindPOIS(self, img: np.ndarray):
+    def FindPOIS(self, img):
+        img = AlwaysNumpy(img)
+
         # Mask the image
         img = image.ThresholdMask(img, threshold=0.1)
 
@@ -110,18 +116,22 @@ class CircleBoard(CalibrationBoard):
         flags = (cv2.CALIB_CB_ASYMMETRIC_GRID if self.m_Staggered else cv2.CALIB_CB_SYMMETRIC_GRID)
 
         result, corners = cv2.findCirclesGrid(uint_img, self.m_POICount, blobDetector=detector, flags=flags)
-        corners = corners.squeeze()
 
         if not result:
-            if self.debug: 
-                image.Show(uint_img)
+            if self.debug:
+                print("Failed to detect POIs")
+                image.Show(uint_img, size=(2100, 1400))
 
             return None
+        
+        corners = corners.squeeze()
             
         if self.debug:
-            debugImage = cv2.drawChessboardCorners(uint_img, self.m_POICount, corners, True)
-            debugImage = cv2.circle(debugImage, corners[0].astype(int), 10, 0, -1)
-            image.Show(debugImage)
+            print("Successfully detected POIs")
+            debugImage = cv2.cvtColor(uint_img, cv2.COLOR_GRAY2BGR)
+            debugImage = cv2.drawChessboardCorners(debugImage, self.m_POICount, corners, True)
+            debugImage = cv2.circle(debugImage, corners[0].astype(int), 10, (255, 0, 0), -1)
+            image.Show(debugImage, size=(2100, 1400))
 
         return corners
 

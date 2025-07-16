@@ -66,7 +66,7 @@ def test_calibration():
 
   for res in resolutions:
     res_path = exp_root / f"{res[0]}x{res[1]}"
-    img_repo = FileImageRepo(res_path, fileExt='.tif')
+    img_repo = FileImageRepo(res_path, useExt='.tif')
     
     camera = board.FileCamera(resolution=res[::-1], channels=1, imgs=list(img_repo.GetBy("calibration", sorted=True)))
 
@@ -74,8 +74,8 @@ def test_calibration():
     area_max = area_min * 4.5
     calib_board = board.CircleBoard(circleSpacing=0.03, poiCount=(4, 13), inverted=True, staggered=True, areaHint=(area_min, area_max))
 
-    calibrator = calibration.StereoCalibrator(calib_board)
-    calibrator.Calibrate(camera, projector, shifter, unwrapper, imageCount=orientations)
+    calibrator = calibration.StereoCharacteriser(calib_board)
+    calibrator.Characterise(camera, projector, shifter, unwrapper, poseCount=orientations)
 
     # Save the experiment information and the calibrated camera / projector
     FileCameraConfigRepo(res_path, overwrite=True).Add(camera, "camera")
@@ -102,7 +102,7 @@ def test_measurement():
   
   cam_repo = FileCameraConfigRepo(calib_path, overwrite=True)
   camera: board.FileCamera = cam_repo.Get("camera")
-  img_repo = FileImageRepo(calib_path, fileExt='.tif', channels=camera.channels)
+  img_repo = FileImageRepo(calib_path, useExt='.tif', channels=camera.channels)
 
   proj_repo = FileProjectorRepo(calib_path, overwrite=True)
   projector: board.FakeProjector = proj_repo.Get("projector")

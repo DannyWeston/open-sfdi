@@ -1,94 +1,105 @@
 import pytest
+import cProfile
+import pstats
+
+from pathlib import Path
 
 from opensfdi import services, cloud, calibration as calib, reconstruction as recon
 from opensfdi.devices import board, camera, projector
 from opensfdi.phase import unwrap, shift
+from opensfdi.utils import ProcessingContext, AlwaysNumpy
+
+CUDA_LAUNCH_BLOCKING=1
 
 from . import utils
 
-expRoot = utils.DATA_ROOT / "quicktest2"
+expRoot = utils.DATA_ROOT / "realdata"
+
+expRoot = Path("C:\\Users\\Dan\\Desktop\\realdata")
 
 @pytest.mark.skip(reason="Not ready")
 def test_calibration():
-    # Instantiate classes for calibration
-    # Load the images to use in the calibration process
-
     # Fringe projection & calibration parameters
-    shifterMask = 0.03
-    phaseCount = 8
-    stripeCounts = [1.0, 8.0, 64.0]
-    boardPoses = 13
 
-    proj = utils.FakeFPProjector(projector.ProjectorConfig(
-        resolution=(912, 1140), channels=1,
-        throwRatio=1.4, pixelSize=1.25)
-    )
+    # Use GPU for calculationsc v
+    with ProcessingContext.UseGPU(True):
 
-    imgRepo = services.FileImageRepo(expRoot, fileExt='.tif')
+        proj = utils.FakeFPProjector(projector.ProjectorConfig(
+            resolution=(1140, 912), channels=1,
+            throwRatio=1.4, pixelSize=1.25)
+        )
 
-    camRes = (1080, 1920)
-    cam = camera.FileCamera(camera.CameraConfig(camRes, channels=1), images=list(imgRepo.GetBy("calibration", sorted=True)))
+        imgRepo = services.FileImageRepo(expRoot, useExt='bmp')
 
-    minArea = camRes[0] * camRes[1]
-    maxArea = minArea * 4.5
-    calibBoard = board.CircleBoard(circleSpacing=(0.03, 0.03), poiCount=(4, 13), inverted=True, staggered=True)
-    # calibBoard.debug = True
+        camRes = (3648, 5472)
+        cam = camera.FileCamera(camera.CameraConfig(camRes, channels=1), images=[imgRepo.Get(f"calibration{i}") for i in range(462)])
 
-    shifter = shift.NStepPhaseShift(phaseCount, mask=shifterMask)
-    unwrapper = unwrap.MultiFreqPhaseUnwrap(stripeCounts)
+        calibBoard = board.CircleBoard(circleSpacing=(7.778174593052023, 7.778174593052023), poiCount=(4, 13), inverted=True, staggered=True)
+        # calibBoard = board.CircleBoard(poiCount=(4, 13), inverted=True, staggered=True)
+        calibBoard.debug = False
 
-    calibrator = calib.StereoCalibrator(calibBoard)
-    calibrator.Calibrate(cam, proj, shifter, unwrapper, imageCount=boardPoses)
+        shifter = shift.NStepPhaseShift([6, 6, 9], mask=0.03)
+
+        unwrapper = unwrap.MultiFreqPhaseUnwrap(
+            numStripesVertical =    [1.0, 10.133333333333, 101.33333333],
+            numStripesHorizontal =  [1.0, 7.9166666666666, 63.333333333]
+        )
+
+        # Profiling
+        profiler = cProfile.Profile()
+        profiler.enable()
+        
+        calibrator = calib.StereoCharacteriser(calibBoard)
+        calibrator.Characterise(cam, proj, shifter, unwrapper, poseCount=11)
+        
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats("cumulative")
+        stats.print_stats(10)
 
     # Save the experiment information and the calibrated camera / projector
     # TODO: Implement services for camera and projector to make interface easier
-    services.FileCameraConfigRepo(expRoot, overwrite=True).Add(cam.config, "camera")
-    services.FileProjectorRepo(expRoot, overwrite=True).Add(proj.config, "projector")
+    services.FileCameraConfigRepo(expRoot).Add(cam.config, "camera")
+    services.FileProjectorRepo(expRoot).Add(proj.config, "projector")
 
-    services.FileVisionConfigRepo(expRoot, overwrite=True).Add(cam.visionConfig, "camera_vision")
-    services.FileVisionConfigRepo(expRoot, overwrite=True).Add(proj.visionConfig, "projector_vision")
+    visionRepo = services.FileVisionConfigRepo(expRoot)
+    visionRepo.Add(cam.visionConfig, "camera_vision")
+    visionRepo.Add(proj.visionConfig, "projector_vision")
 
 # @pytest.mark.skip(reason="Not ready")
 def test_measurement():
-    calibBoard = board.CircleBoard(circleSpacing=(0.03, 0.03), poiCount=(4, 13), inverted=True, staggered=True)
 
-    phaseCount = 8
-    stripeCounts = [1.0, 8.0, 64.0]
+    with ProcessingContext.UseGPU(True):
+        # calibBoard = board.CircleBoard(circleSpacing=(0.03, 0.03), poiCount=(4, 13), inverted=True, staggered=True)
+        reconstructor = recon.StereoReconstructor()
 
-    objects = [
-        "Icosphere",
-        "Monkey",
-        "Donut",
-    ]
+        camRepo = services.FileCameraConfigRepo(expRoot)
+        projRepo = services.FileProjectorRepo(expRoot)
+        visionRepo = services.FileVisionConfigRepo(expRoot)
+        
+        cam = camera.FileCamera(config=camRepo.Get("camera"), visionConfig=visionRepo.Get("camera_vision"))
+        proj = utils.FakeFPProjector(config=projRepo.Get("projector"), visionConfig=visionRepo.Get("projector_vision"))
 
-    reconstructor = recon.StereoReconstructor()
+        imageRepo = services.FileImageRepo(expRoot, useExt='bmp')
 
-    camRepo = services.FileCameraConfigRepo(expRoot)
-    projRepo = services.FileProjectorRepo(expRoot)
-    visionRepo = services.FileVisionConfigRepo(expRoot)
-    
-    cam = camera.FileCamera(config=camRepo.Get("camera"), visionConfig=visionRepo.Get("camera_vision"))
-    proj = utils.FakeFPProjector(config=projRepo.Get("projector"), visionConfig=visionRepo.Get("projector_vision"))
+        shifter = shift.NStepPhaseShift([6, 6, 9], mask=0.1)
 
-    imageRepo = services.FileImageRepo(expRoot, fileExt='.tif', channels=cam.config.channels)
+        unwrapper = unwrap.MultiFreqPhaseUnwrap([1.0, 7.9166666666666, 63.33333333333333])
 
-    shifter = shift.NStepPhaseShift(phaseCount, 0.1)
-    unwrapper = unwrap.MultiFreqPhaseUnwrap(stripeCounts)
+        cam.images = [imageRepo.Get(f"measurement{i}") for i in range(21)]
 
-    for obj in objects:
-        cam.images = list(imageRepo.GetBy(obj, sorted=True))
+        measurementCloud, _ = reconstructor.Reconstruct(cam, proj, shifter, unwrapper, vertical=False)
 
-        measurementCloud, _ = reconstructor.Reconstruct(cam, proj, shifter, unwrapper, stripeCounts[-1], useX=False)
+    measurementCloud = AlwaysNumpy(measurementCloud)
 
-        # Align and save
-        # measurementCloud = cloud.AlignToCalibBoard(measurementCloud, cam, calibBoard)
-        cloud.SaveNumpyAsCloud(expRoot / f"{obj}.ply", measurementCloud)
+    # Align and save
+    # measurementCloud = cloud.AlignToCalibBoard(measurementCloud, cam, calibBoard)
+    cloud.SaveNumpyAsCloud(expRoot / f"measurement.ply", measurementCloud)
 
-        # Convert to open3d cloud
-        measurementCloud = cloud.NumpyToCloud(measurementCloud)
+    # Convert to open3d cloud
+    measurementCloud = cloud.NumpyToCloud(measurementCloud)
 
         # # Load ground truth cloud
         # groundTruthMesh = cloud.LoadMesh(utils.DATA_ROOT / f"{obj}.stl")
         # groundTruthCloud = cloud.MeshToCloud(groundTruthMesh)
 
-        cloud.DrawCloud(measurementCloud)
+    cloud.DrawCloud(measurementCloud)

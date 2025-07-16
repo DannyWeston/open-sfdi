@@ -1,66 +1,71 @@
-import numpy as np
-
 from abc import ABC, abstractmethod
 
-from . import ShowPhasemap
-from ..image import ThresholdMask, Show
+from ..image import ThresholdMask
+
+from ..utils import ProcessingContext
 
 class PhaseShift(ABC):
     @abstractmethod
-    def __init__(self, phase_count, shift_mask=0.01):
-        self.__phase_count = phase_count
+    def __init__(self, phiVertical, phiHorizontal=None, contrastMask=0.01):
+        self.m_PhiVertical = phiVertical
+        self.m_PhiHorizontal = phiVertical if phiHorizontal is None else phiHorizontal
 
-        self._shift_mask = shift_mask
+        self.m_ContrastMask = contrastMask
 
-    @abstractmethod
-    def GetPhases(self) -> np.ndarray:
-        raise NotImplementedError
+        self.m_Vertical = True
+
+    @property
+    def vertical(self):
+        return self.m_Vertical
     
-    @abstractmethod
-    def Shift(self, imgs) -> np.ndarray:
-        raise NotImplementedError
+    @vertical.setter
+    def vertical(self, value: bool):
+        self.m_Vertical = value
     
     @property
-    def phase_count(self):
-        return self.__phase_count
-    
-    @phase_count.setter
-    def phase_count(self, value):
-        self.__phase_count = value
+    def phaseCounts(self):
+        return self.m_PhiVertical if self.vertical else self.m_PhiHorizontal
 
-    def GetPhases(self):
-        return np.linspace(0, 2.0 * np.pi, self.phase_count, endpoint=False)
+    @abstractmethod
+    def Shift(self, imgs):
+        raise NotImplementedError
+
+    def __iter__(self):
+        return self.phaseCounts.__iter__()
+
+    def __next__(self):
+        return self.phaseCounts.__next__()
 
 class NStepPhaseShift(PhaseShift):
-    def __init__(self, phase_count=3, mask=0.0):
-        super().__init__(phase_count, shift_mask=mask)
+    def __init__(self, phiVertical, phiHorizontal=None, mask=0.0):
+        super().__init__(phiVertical, phiHorizontal=phiHorizontal, contrastMask=mask)
 
-        if phase_count < 3:
-            raise Exception("The N-step method requires 3 or more phases")
-
-    def Shift(self, imgs) -> np.ndarray:
-        a = np.zeros_like(imgs[0])
-        b = np.zeros_like(a)
-
-        phases = self.GetPhases()
-        N = len(imgs)
+        if (v := len(phiVertical)) < 3:
+            raise Exception(f"The N-step method requires 3 or more phases ({v} passed for vertical)")
         
-        # Check number of passed images is expected
-        assert self.phase_count == N
+        if (phiHorizontal is not None) and ((h := len(phiHorizontal)) < 3):
+            raise Exception(f"The N-step method requires 3 or more phases ({h} passed for horizontal)")
 
-        for i, phase in enumerate(phases):
-            a += imgs[i] * np.sin(phase)
-            b += imgs[i] * np.cos(phase)
+    def Shift(self, imgs):
+        xp = ProcessingContext().xp
+        
+        N = len(imgs)
 
-        result = np.arctan2(-a, b)
-        result[result < 0] += 2.0 * np.pi # Correct arctan2 function
+        phases = (xp.arange(N) * 2.0 * xp.pi) / N
 
-        if self._shift_mask <= 0.0:
-            return result
-            
-        mod = (2.0 / N) * np.sqrt(a ** 2 + b ** 2)
+        a = xp.sum(imgs * xp.sin(phases).reshape(-1, 1, 1), axis=0)
+        b = xp.sum(imgs * xp.cos(phases).reshape(-1, 1, 1), axis=0)
 
-        float_mask = ThresholdMask(mod, threshold=self._shift_mask)
-        float_mask[float_mask == 0.0] = np.nan # Set to nans
+        result = xp.arctan2(-a, b)
+        result[result < 0.0] += (xp.pi * 2.0)
 
-        return result * float_mask
+        # Return result if no masking needed
+        if self.m_ContrastMask <= 0.0: return result
+
+        contrast = (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)
+
+        contrastMask = xp.asarray(ThresholdMask(contrast, threshold=self.m_ContrastMask))
+
+        contrastMask[contrastMask == 0.0] = xp.nan # Anything zero set to NaNs
+
+        return result * contrastMask

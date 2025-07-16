@@ -40,7 +40,7 @@ def test_calibration():
 
   for res in resolutions:
     resPath = expRoot / f"{res[0]}x{res[1]}"
-    imgRepo = FileImageRepo(resPath, fileExt='.tif')
+    imgRepo = FileImageRepo(resPath, useExt='.tif')
     
     cam = camera.FileCamera(camera.CameraConfig(resolution=res[::-1], channels=1),
       images=list(imgRepo.GetBy("calibration", sorted=True)))
@@ -49,8 +49,8 @@ def test_calibration():
     maxArea = minArea * 4.5
     calibBoard = board.CircleBoard(circleSpacing=(0.03, 0.03), poiCount=(4, 7), inverted=True, staggered=True, areaHint=(minArea, maxArea))
 
-    calibrator = calib.StereoCalibrator(calibBoard)
-    calibrator.Calibrate(cam, proj, shifter, unwrapper, imageCount=boardPoses)
+    calibrator = calib.StereoCharacteriser(calibBoard)
+    calibrator.Characterise(cam, proj, shifter, unwrapper, poseCount=boardPoses)
 
     # Save the experiment information and the calibrated camera / projector
     FileCameraConfigRepo(resPath, overwrite=True).Add(cam.config, "camera")
@@ -90,7 +90,7 @@ def test_measurement():
     unwrapper = unwrap.MultiFreqPhaseUnwrap(stripeCounts)
 
     # For loading images
-    imageRepo = FileImageRepo(expRoot / f"{resolution[0]}x{resolution[1]}", fileExt='.tif', channels=cam.config.channels)
+    imageRepo = FileImageRepo(expRoot / f"{resolution[0]}x{resolution[1]}", useExt='.tif', channels=cam.config.channels)
 
     for obj in objects:
       cam.images = list(imageRepo.GetBy(f"{obj}_", sorted=True))

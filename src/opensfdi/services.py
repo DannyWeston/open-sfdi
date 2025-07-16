@@ -47,7 +47,7 @@ class IRepository(ABC, Generic[T]):
 
 class VisionConfigRepo(IRepository[vision.VisionConfig]):
     @abstractmethod
-    def __init__(self, overwrite=False):
+    def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
 
     @abstractmethod
@@ -75,7 +75,7 @@ class VisionConfigRepo(IRepository[vision.VisionConfig]):
         pass
 
 class FileVisionConfigRepo(VisionConfigRepo):
-    def __init__(self, storageDir: Path, overwrite=False):
+    def __init__(self, storageDir: Path, overwrite=True):
         super().__init__(overwrite=overwrite)
 
         self.m_StorageDir = storageDir
@@ -138,13 +138,13 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
         # Camera is characterised so make calibrated config
         return vision.VisionConfig(
-            rotation=np.array(rawJson["Rotation"]),
-            translation=np.array(rawJson["Translation"]),
-            intrinsicMat=np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
-            distortMat=np.array(rawJson["DistortMat"]),
-            reprojErr=rawJson["ReprojErr"],
-            targetResolution=rawJson["TargetResolution"],
-            posePOICoords=np.array(rawJson["PosePOICoords"])
+            rotation =          np.array(rawJson["Rotation"]),
+            translation =       np.array(rawJson["Translation"]),
+            intrinsicMat =      np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
+            distortMat =        np.array(rawJson["DistortMat"]),
+            reprojErr =         rawJson["ReprojErr"],
+            targetResolution =  rawJson["TargetResolution"],
+            posePOICoords =     np.array(rawJson["PosePOICoords"])
         )
 
 
@@ -152,7 +152,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
 class BaseCameraConfigRepo(IRepository[vision.VisionConfig]):
     @abstractmethod
-    def __init__(self, overwrite=False):
+    def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
 
     @abstractmethod
@@ -180,7 +180,7 @@ class BaseCameraConfigRepo(IRepository[vision.VisionConfig]):
         pass
 
 class FileCameraConfigRepo(BaseCameraConfigRepo):
-    def __init__(self, storage_dir: Path, overwrite=False):
+    def __init__(self, storage_dir: Path, overwrite=True):
         super().__init__(overwrite=overwrite)
 
         self.m_StorageDir = storage_dir
@@ -245,7 +245,7 @@ class FileCameraConfigRepo(BaseCameraConfigRepo):
 
 class BaseProjectorConfigRepo(IRepository[projector.ProjectorConfig]):
     @abstractmethod
-    def __init__(self, overwrite=False):
+    def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
 
     @abstractmethod
@@ -273,7 +273,7 @@ class BaseProjectorConfigRepo(IRepository[projector.ProjectorConfig]):
         pass
 
 class FileProjectorRepo(BaseProjectorConfigRepo):
-    def __init__(self, storageDir: Path, overwrite=False):
+    def __init__(self, storageDir: Path, overwrite=True):
         super().__init__(overwrite=overwrite)
 
         self.m_StorageDir = storageDir
@@ -453,18 +453,8 @@ class FileExperimentRepo(BaseExperimentRepo):
 
 class BaseImageRepo(IRepository[Image]):
     @abstractmethod
-    def __init__(self, overwrite: bool, channels=1):
+    def __init__(self, overwrite: bool):
         self.overwrite = overwrite
-
-        self.__channels = channels
-
-    @property
-    def channels(self):
-        return self.__channels
-    
-    @channels.setter
-    def channels(self, value):
-        self.__channels = value
 
     @abstractmethod
     def Get(self, id: str) -> Image:
@@ -491,14 +481,22 @@ class BaseImageRepo(IRepository[Image]):
         pass
 
 class FileImageRepo(BaseImageRepo):
-    def __init__(self, storage_dir: Path, fileExt='.tif', overwrite=False, channels=1):
-        super().__init__(overwrite=overwrite, channels=channels)
+    SUPPORTED_FILE_TYPES = [
+        "tif",
+        "bmp"
+    ]
 
-        self.storage_dir = storage_dir
-        self._file_ext = fileExt
+    def __init__(self, storageDir: Path, useExt='tif', overwrite=True):
+        super().__init__(overwrite=overwrite)
 
-    def __load_img(self, filename):
-        return FileImage(self.storage_dir / f"{filename}{self._file_ext}", channels=self.channels)
+        if useExt not in self.SUPPORTED_FILE_TYPES:
+            raise Exception(f"Using a file type of '{useExt}' is not supported")
+
+        self.m_StorageDir = storageDir
+        self.m_FileExt = useExt
+
+    def __LoadImage(self, filename):
+        return FileImage(self.m_StorageDir / f"{filename}.{self.m_FileExt}")
 
     def Add(self, img: Image, id: str):
         ''' Save an image to a repository '''
@@ -508,7 +506,7 @@ class FileImageRepo(BaseImageRepo):
         if 0 < len(found) and (not self.overwrite):
             raise FileExistsError(f"Image with id {found[0]} already exists")
 
-        path:Path = self.storage_dir / found[0]
+        path = self.m_StorageDir / f"{found[0]}.{self.m_FileExt}"
 
         # Save as float32 to disk
         cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToF32(img), cv2.COLOR_RGB2BGR))
@@ -519,13 +517,13 @@ class FileImageRepo(BaseImageRepo):
         if len(found) < 1:
             raise FileNotFoundError(f"Could not find image with id '{id}'")
 
-        return self.__load_img(found[0])
+        return self.__LoadImage(found[0])
 
     def GetBy(self, regex, sorted=False) -> Iterator[Image]:
-        yield from (self.__load_img(fn) for fn in self.Find(regex, sorted))
+        yield from (self.__LoadImage(fn) for fn in self.Find(regex, sorted))
 
     def Find(self, regex: str, sorted=False) -> list[str]:
-        filenames = [file.stem for file in self.storage_dir.glob(f"*{self._file_ext}")]
+        filenames = [file.stem for file in self.m_StorageDir.glob(f"*.{self.m_FileExt}")]
 
         filenames = list(filter(lambda filename: re.match(regex, filename), filenames))
 
