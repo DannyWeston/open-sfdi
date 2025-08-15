@@ -67,6 +67,12 @@ class ProcessingContext:
     def __str__(self):
         return f"ProcessingContext(UseGPU={self.UseGPU}"
 
+def TransMat(R, T):
+    M = np.eye(4, 4)
+    M[:3, :3] = R
+    M[:3, 3] = T
+    return M
+
 def AlwaysNumpy(arr):
     if type(arr) == np.ndarray:
         return arr

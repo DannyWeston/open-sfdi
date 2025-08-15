@@ -3,7 +3,7 @@ import cv2
 
 from abc import ABC, abstractmethod
 
-from ..utils import AlwaysNumpy
+from ..utils import AlwaysNumpy, ProcessingContext
 
 from .. import image
 
@@ -71,7 +71,7 @@ class Checkerboard(CalibrationBoard):
         return corners
 
 class CircleBoard(CalibrationBoard):
-    def __init__(self, circleSpacing=(0.03, 0.03), circleDiameter=1.0, poiCount=(4, 13), inverted=True, staggered=True, areaHint=None):
+    def __init__(self, circleSpacing=(0.03, 0.03), circleDiameter=1.0, poiCount=(4, 13), inverted=True, staggered=True, areaHint=None, poiMask=0.1):
         super().__init__()
         # TODO: Maybe make separate immutable classes for staggered and unstaggered?
         
@@ -82,56 +82,64 @@ class CircleBoard(CalibrationBoard):
         self.m_Staggered = staggered
         self.m_Inverted = inverted
 
+        self.m_POIMask = poiMask
+
         # Setup blob detector
         self.m_DetectorParams = cv2.SimpleBlobDetector_Params()
 
+        # Check if filter by area
         if areaHint is not None:
             # TODO: Implement polynomial to find rough relationship between circle sizes and resolution
-            # 480x270   :   (100, 400)
-            # 640x360   :   (200, 1000)
-            # 960x540   :   (500, 2000)
-            # 1440x810  :   (1250, 5000)
-            # 1920x1080 :   (2500, 13000)
-            # 2560x1440 :   (5000, 20000)
-            # 3840x2160 :   (7000, 28000)
-
             self.m_DetectorParams.filterByArea = True
             self.m_DetectorParams.minArea = areaHint[0]
             self.m_DetectorParams.maxArea = areaHint[1]
 
+        else: self.m_DetectorParams.filterByArea = False
+
+        # self.m_DetectorParams.minThreshold = int(poiMask * 255)
+        # self.m_DetectorParams.maxThreshold = 255
+        # self.m_DetectorParams.thresholdStep = 10
+
+        # Filter by colour
+        self.m_DetectorParams.filterByColor = True
         self.m_DetectorParams.blobColor = 255 if inverted else 0
 
     def FindPOIS(self, img):
-        img = AlwaysNumpy(img)
-
-        # Mask the image
-        img = image.ThresholdMask(img, threshold=0.1)
-
-        # Convert image to uint datatype
-        uint_img = image.ToU8(img)
+        # Sadly some jobs can only be run on the CPU... such as cv2.findCirclesGrid
+        # It is annoying... stupid cv2...
+        # To fix this *you* could implement a custom circle grid finder
+        # - I am too lazy and sleep deprived
 
         # Create a detector with the parameters
         detector = cv2.SimpleBlobDetector_create(self.m_DetectorParams)
 
-        flags = (cv2.CALIB_CB_ASYMMETRIC_GRID if self.m_Staggered else cv2.CALIB_CB_SYMMETRIC_GRID)
+        flags = cv2.CALIB_CB_CLUSTERING
+        flags += cv2.CALIB_CB_ASYMMETRIC_GRID if self.m_Staggered else cv2.CALIB_CB_SYMMETRIC_GRID
 
-        result, corners = cv2.findCirclesGrid(uint_img, self.m_POICount, blobDetector=detector, flags=flags)
+        # Convert to numpy uint8 for cv2
+        img = image.ThresholdMask(img, self.m_POIMask)
+        img = image.ToU8(img)
+
+        result, corners = cv2.findCirclesGrid(AlwaysNumpy(img), self.m_POICount, blobDetector=detector, flags=flags)
 
         if not result:
             if self.debug:
                 print("Failed to detect POIs")
-                image.Show(uint_img, size=(2100, 1400))
+                image.Show(img)
 
             return None
+    
+        corners = corners.reshape(-1, 2)
         
-        corners = corners.squeeze()
-            
         if self.debug:
-            print("Successfully detected POIs")
-            debugImage = cv2.cvtColor(uint_img, cv2.COLOR_GRAY2BGR)
-            debugImage = cv2.drawChessboardCorners(debugImage, self.m_POICount, corners, True)
-            debugImage = cv2.circle(debugImage, corners[0].astype(int), 10, (255, 0, 0), -1)
-            image.Show(debugImage, size=(2100, 1400))
+            h, w = self.m_POICount
+
+            debugImg = AlwaysNumpy(image.ExpandN(img))
+
+            for j, (x, y) in enumerate(corners):
+                debugImg = cv2.putText(debugImg, str(j), (int(x), int(y)), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 5)
+
+            image.Show(debugImg, name=f"Image: Successfully detected {h*w} POIs")
 
         return corners
 
@@ -139,16 +147,18 @@ class CircleBoard(CalibrationBoard):
         # Multiply by square width
         h, w = self.m_POICount
 
+        xDelta = self.m_CircleSpacing[1] / 2
+        yDelta = self.m_CircleSpacing[0]
+
         # Setup checkerboard world coordinates
         if self.m_Staggered:
             xs, ys = np.mgrid[:w, :h].astype(np.float32)
-            xs *= self.m_CircleSpacing[1] / 2
+            xs *= -xDelta
 
-            ys *= self.m_CircleSpacing[0]
-            ys[1::2] += self.m_CircleSpacing[0] / 2
+            ys *= yDelta
+            ys[1::2] += yDelta / 2
             
             zs = np.zeros((h * w), dtype=np.float32)
-
             circleCentres = np.vstack([xs.ravel(), ys.ravel(), zs]).T
         else:
             circleCentres = np.zeros((w * h, 3), np.float32)

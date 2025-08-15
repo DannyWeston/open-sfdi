@@ -3,6 +3,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from skimage.restoration import unwrap_phase
 
+from . import ShowPhasemap
+
 from ..utils import ProcessingContext
 
 # Phase Unwrapping
@@ -15,6 +17,14 @@ class PhaseUnwrap(ABC):
         self.m_NumStripesHorizontal = numStripesVertical if numStripesHorizontal is None else numStripesHorizontal
 
         self.m_Vertical = True
+
+    @property
+    def vertNumStripes(self):
+        return self.m_NumStripesVertical
+    
+    @property
+    def horiNumStripes(self):
+        return self.m_NumStripesHorizontal
 
     @property
     def vertical(self):
@@ -30,9 +40,7 @@ class PhaseUnwrap(ABC):
 
     @property
     def stripeCount(self):
-        xp = ProcessingContext().xp
-
-        return xp.asarray(self.m_NumStripesVertical if self.vertical else self.m_NumStripesHorizontal)
+        return self.vertNumStripes if self.vertical else self.horiNumStripes
 
     def __iter__(self):
         return self.stripeCount.__iter__()
@@ -69,7 +77,7 @@ class MultiFreqPhaseUnwrap(PhaseUnwrap):
         total = len(phasemaps)
 
         if total < 2: raise Exception("You must pass at least two spatial frquencies to use ")
-
+ 
         numStripes = xp.asarray(self.stripeCount)
         phasemaps = xp.asarray(phasemaps)
 

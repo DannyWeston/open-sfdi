@@ -2,8 +2,13 @@ import struct
 import numpy as np
 import open3d as o3d
 
-from .devices import camera, board
 from pathlib import Path
+
+from .devices import camera, board
+from .utils import AlwaysNumpy, ProcessingContext
+
+from . import image
+
 
 def AlignToCalibBoard(pc: np.ndarray, cam: camera.Camera, board: board.CalibrationBoard):
     centreCoords = board.GetBoardCentreCoords()
@@ -18,14 +23,33 @@ def AlignToCalibBoard(pc: np.ndarray, cam: camera.Camera, board: board.Calibrati
 
     return (R @ (pc.T + t)).T
 
-def NumpyToCloud(data: np.ndarray):
+def ArrayToCloud(data: np.ndarray, colours=None):
+    data = AlwaysNumpy(data)
+
     pc = o3d.geometry.PointCloud()
     pc.points = o3d.utility.Vector3dVector(data)
+
+    if colours is not None: 
+       pc = SetCloudColours(pc, colours)
 
     return pc
 
 def LoadCloud(filename):
     return o3d.io.read_point_cloud(filename)
+
+def SetCloudColours(pc, colours):
+    # open3d requires textures to be colour-based (3 channel), and RGB (not BGR like opencv)
+    # doesn't support cupy arrays too (GPU-side)
+    xp = ProcessingContext().xp
+
+    if colours.ndim == 1: 
+        coloursRGB = AlwaysNumpy(colours.reshape(-1, 1) * xp.ones((1, 3)))
+    else:
+        coloursRGB = AlwaysNumpy(xp.flip(colours, axis=1))
+
+    pc.colors = o3d.utility.Vector3dVector(coloursRGB)
+
+    return pc
 
 def DrawClouds(pointclouds):
     vis = o3d.visualization.Visualizer()
@@ -48,15 +72,17 @@ def LoadMesh(filepath):
 def MeshToCloud(mesh, samples=10000):
    return mesh.sample_points_poisson_disk(samples)
 
-def SaveNumpyAsCloud(filename: Path, arr: np.ndarray):
-  with open(filename, "wb") as file:
-    file.write(bytes('ply\n', 'utf-8'))
-    file.write(bytes('format binary_little_endian 1.0\n', 'utf-8'))
-    file.write(bytes(f'element vertex {arr.shape[0]}\n', 'utf-8'))
-    file.write(bytes(f'property float x\n', 'utf-8'))
-    file.write(bytes(f'property float y\n', 'utf-8'))
-    file.write(bytes(f'property float z\n', 'utf-8'))
-    file.write(bytes(f'end_header\n', 'utf-8'))
+def SaveArrayAsCloud(filename: Path, data: np.ndarray):
+    data = AlwaysNumpy(data)
 
-    for i in range(arr.shape[0]):
-      file.write(bytearray(struct.pack("fff", arr[i, 0], arr[i, 1], arr[i, 2])))
+    with open(filename, "wb") as file:
+        file.write(bytes('ply\n', 'utf-8'))
+        file.write(bytes('format binary_little_endian 1.0\n', 'utf-8'))
+        file.write(bytes(f'element vertex {data.shape[0]}\n', 'utf-8'))
+        file.write(bytes(f'property float x\n', 'utf-8'))
+        file.write(bytes(f'property float y\n', 'utf-8'))
+        file.write(bytes(f'property float z\n', 'utf-8'))
+        file.write(bytes(f'end_header\n', 'utf-8'))
+
+        for i in range(data.shape[0]):
+            file.write(bytearray(struct.pack("fff", data[i, 0], data[i, 1], data[i, 2])))

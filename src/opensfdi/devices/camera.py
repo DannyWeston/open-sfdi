@@ -4,8 +4,7 @@ import cv2
 from abc import ABC, abstractmethod
 
 from .vision import VisionConfig
-
-from .. import image
+from .. import image, utils
 
 class CameraConfig:
     def __init__(self, resolution, channels):
@@ -63,28 +62,43 @@ class Camera(ABC):
     def Characterise(self, worldCoords, pixelCoords):
         h, w = self.config.resolution
 
-        flags = 0
-        flags |= cv2.CALIB_FIX_K3
-        flags |= cv2.CALIB_USE_INTRINSIC_GUESS
+        # flags = cv2.CALIB_USE_INTRINSIC_GUESS
 
-        sensorWidth = 3.76 # mm
-        focalX = (3.6 / sensorWidth) * w # mm
-        focalY = focalX # TODO: Incorporate pixelSize for camera
+        # fx = 16
+        # fy = 16
+        # sw = 13.13
+        # sh = 8.76
 
-        kGuess = np.array([
-            [focalX,        0.0,    w/2],
-            [0.0,           focalY, h/2],
-            [0.0,           0.0,    1.0]
-        ])
+        # kGuess = np.array([
+        #     [fx * w / sw,   0.0,            w / 2],
+        #     [0.0,           fy * h / sh,    h / 2],
+        #     [0.0,           0.0,            1.0]
+        # ])
 
-        reprojErr, K, D, R, T = cv2.calibrateCamera(
-            worldCoords, pixelCoords, (w, h), kGuess, None, flags=flags
-        )
+        # reprojErr, K, D, R, T = cv2.calibrateCamera(
+        #     worldCoords, pixelCoords, (w, h), kGuess, None, flags=flags
+        # )
+
+        reprojErr, K, D, R, T = cv2.calibrateCamera(worldCoords, pixelCoords, (w, h), None, None)
+
+        # Calculate camera extrinsics and board poses using gathered information
+        camRotation = cv2.Rodrigues(R[0])[0]
+        camTranslation = T[0].squeeze()
+
+        M0 = utils.TransMat(camRotation, camTranslation)
+
+        boardDeltaTfs = [np.eye(4, 4)]
+        for i in range(1, len(worldCoords)):
+            Mi = utils.TransMat(cv2.Rodrigues(R[i])[0], T[i].squeeze())
+            boardDeltaTfs.append(np.linalg.inv(Mi) @ M0)
+
+        boardDeltaTfs = np.asarray(boardDeltaTfs)
 
         self.visionConfig = VisionConfig(
-            rotation=cv2.Rodrigues(R[0])[0], translation=T[0], 
+            rotation=camRotation, translation=camTranslation,
             intrinsicMat=K, distortMat=D, reprojErr=reprojErr,
-            targetResolution=(h, w), posePOICoords=pixelCoords
+            targetResolution=(h, w), posePOICoords=pixelCoords,
+            boardPoses=boardDeltaTfs
         )
 
         # errors = []
@@ -148,7 +162,7 @@ class CV2Camera(Camera):
             raise Exception("Could not capture an image with the CV2Camera")
         
         # Must convert to float32, spec!
-        rawImage = image.ToF32(rawImage)
+        rawImage = image.ToFloat(rawImage)
 
         # Convert to grey if needed
         if self.config.channels == 1:

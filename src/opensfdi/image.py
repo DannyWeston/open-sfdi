@@ -10,22 +10,23 @@ from .devices.vision import VisionConfig
 from .utils import ProcessingContext, AlwaysNumpy
 
 class Image(ABC):
-    def __init__(self, data: np.ndarray):
+    def __init__(self, data):
         self.m_RawData = data
 
     @property
-    def rawData(self) -> np.ndarray:
+    def rawData(self):
         return self.m_RawData
 
-# Images can be lazy loaded making use of lazy loading pattern
 class FileImage(Image):
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, preload=False):
         super().__init__(None)
 
         self.m_Path: Path = path
 
+        if preload: _ = self.rawData
+
     @property
-    def rawData(self) -> np.ndarray:
+    def rawData(self):
         # Check if the data needs to be loaded
         if self.m_RawData is None:
             self.m_RawData = cv2.imread(str(self.m_Path.resolve()), flags=cv2.IMREAD_UNCHANGED)
@@ -39,47 +40,96 @@ class FileImage(Image):
 def Undistort(img_data, config: VisionConfig):
     return cv2.undistort(img_data, config.intrinsicMat, config.distortMat, None, config.intrinsicMat)  
 
-def AddGaussian(rawData, sigma=0.01, mean=0.0, clip=True):
-    rawData = rawData + np.random.normal(mean, sigma, size=rawData.shape)
+def AddGaussianNoise(rawData, sigma=0.01, mean=0.0, clip=True):
+    xp = ProcessingContext().xp
 
-    if clip: rawData = np.clip(rawData, 0.0, 1.0, dtype=np.float32) 
+    rawData = xp.asarray(rawData)
+    rawData += xp.random.normal(mean, sigma, size=rawData.shape)
+
+    # Check if clip is enabled
+    if clip: return Clip(rawData)
 
     return rawData
 
-def ToGrey(rawData: np.ndarray) -> np.ndarray:
+def AddSaltPepperNoise(rawData, saltPercent=0.05, pepperPercent=0.05):
+    xp = ProcessingContext().xp
+
+    randNoise = xp.random.rand(*rawData.shape)
+
+    if 0.0 < saltPercent:
+        saltMask = randNoise < saltPercent
+        rawData[saltMask] = 1.0 if rawData.dtype == xp.float32 else 255
+
+    if 0.0 < pepperPercent:
+        pepperMask = (randNoise >= saltPercent) & (randNoise < saltPercent + pepperPercent)
+        rawData[pepperMask] = 0.0 if rawData.dtype == xp.float32 else 255
+
+    return rawData
+
+def Clip(rawData):
+    xp = ProcessingContext().xp
+    
+    if rawData.dtype == xp.uint8: rawData = xp.clip(rawData, 0, 255)
+    else: rawData = xp.clip(rawData, 0.0, 1.0)
+
+    return rawData
+
+def ToGrey(rawData):
+    xp = ProcessingContext().xp
+
+    rawData = xp.asarray(rawData)
+
     if rawData.ndim == 2: return rawData
     
     if rawData.ndim == 3:
         h, w, c = rawData.shape
         if c == 1: return rawData.squeeze()
-        if c == 3: return cv2.cvtColor(rawData, cv2.COLOR_BGR2GRAY)
+        if c == 3: return rawData[:, :, 2].squeeze() # Keep red channel for now
 
     raise Exception("Image is in unrecognised format")
 
-def ToF32(rawData) -> np.ndarray:
-    if rawData.dtype == np.float32:
+def ToFloat(rawData):
+    xp = ProcessingContext().xp
+
+    rawData = xp.asarray(rawData)
+
+    if rawData.dtype == xp.float32 or (rawData.dtype == xp.float64):
         return rawData
 
-    if rawData.dtype == int or rawData.dtype == cv2.CV_8U or rawData.dtype == np.uint8:
-        return rawData.astype(np.float32) / 255.0
+    if rawData.dtype == xp.uint8:
+        return rawData.astype(xp.float32) / 255.0
     
     raise Exception(f"Image must be in integer format (found {rawData.dtype})")
 
-def ToU8(rawData) -> np.ndarray:
-    if rawData.dtype == np.uint8:
+def ExpandN(rawData, N=3):
+    xp = ProcessingContext().xp
+
+    rawData = xp.asarray(rawData)
+
+    return xp.dstack([rawData] * N)
+
+def ToU8(rawData):
+    xp = ProcessingContext().xp
+
+    if rawData.dtype == xp.uint8:
         return rawData
 
-    if rawData.dtype != np.float32:
+    if (rawData.dtype != xp.float32) and (rawData.dtype != xp.float64):
         raise Exception(f"Image must be in float format (found {rawData.dtype})")
     
-    return (rawData * 255.0).astype(np.uint8)
+    return (rawData * 255.0).astype(xp.uint8)
 
-def ThresholdMask(rawData, threshold=0.004, max=1.0, type=cv2.THRESH_BINARY):
-    success, result = cv2.threshold(AlwaysNumpy(rawData), threshold, max, type)
+def ThresholdMask(rawData, threshold=0.1):
+    xp = ProcessingContext().xp
 
-    if not success: return None
+    rawData = xp.asarray(rawData.copy())
+
+    belowMask = rawData < threshold
+
+    rawData[belowMask] = 0.0
+    rawData[~belowMask] = 1.0
     
-    return result
+    return rawData
 
 def DC(imgs):
     xp = ProcessingContext().xp
@@ -87,7 +137,7 @@ def DC(imgs):
     """ Calculate average intensity across supplied imgs (return uint8 format)"""
     imgs = xp.asarray(imgs)
 
-    return xp.sum(imgs, axis=0, dtype=np.float32) / len(imgs)
+    return xp.sum(imgs, axis=0, dtype=xp.float32) / len(imgs)
 
 def CalculateVignette(rawData: np.ndarray, expectedMax=None):
     if expectedMax is None: expectedMax = rawData.max()
@@ -115,8 +165,12 @@ def Show(rawData, name='Image', wait=0, size=None):
 
     if cv2.getWindowProperty(name, cv2.WND_PROP_VISIBLE) < 0:
         cv2.namedWindow(name, cv2.WINDOW_NORMAL)
+
+    if size is None:
+        h, w = rawData.shape[:2]
+        rawData = cv2.resize(rawData, (int(1000 * (w / h)), 1000))
     
-    cv2.imshow(name, rawData if size is None else cv2.resize(rawData, size))
+    cv2.imshow(name, rawData)
     cv2.waitKey(wait)
 
 def ShowScatter(xss, yss):

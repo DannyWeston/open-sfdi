@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from ..image import ThresholdMask
+from ..image import ThresholdMask, Show
 
 from ..utils import ProcessingContext
 
@@ -51,21 +51,23 @@ class NStepPhaseShift(PhaseShift):
         
         N = len(imgs)
 
+        # Generate phases (weird reshape for making sure it matches image channel count)
         phases = (xp.arange(N) * 2.0 * xp.pi) / N
+        phases = phases.reshape(-1, *[1] * (imgs.ndim - 1))
 
-        a = xp.sum(imgs * xp.sin(phases).reshape(-1, 1, 1), axis=0)
-        b = xp.sum(imgs * xp.cos(phases).reshape(-1, 1, 1), axis=0)
+        a = xp.sum(xp.sin(phases) * imgs, axis=0)
+        b = xp.sum(xp.cos(phases) * imgs, axis=0)
 
-        result = xp.arctan2(-a, b)
+        result = xp.arctan2(a, b)
         result[result < 0.0] += (xp.pi * 2.0)
 
+        dcImage = (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)
+
         # Return result if no masking needed
-        if self.m_ContrastMask <= 0.0: return result
+        if self.m_ContrastMask is None:
+            return result, dcImage
 
-        contrast = (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)
-
-        contrastMask = xp.asarray(ThresholdMask(contrast, threshold=self.m_ContrastMask))
-
+        contrastMask = ThresholdMask(dcImage, threshold=self.m_ContrastMask)
         contrastMask[contrastMask == 0.0] = xp.nan # Anything zero set to NaNs
 
-        return result * contrastMask
+        return result * contrastMask, dcImage

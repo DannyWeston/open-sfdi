@@ -3,9 +3,10 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 from .utils import ProcessingContext
-from .image import DC, Show
 from .devices import camera, projector, FringeProject
 from .phase import unwrap, shift, ShowPhasemap
+
+from . import image
 
 class ReconstructionResult:
     def __init__(self):
@@ -24,16 +25,22 @@ class IReconstructor(ABC):
     @abstractmethod
     def GatherPhasemap(self, camera: camera.Camera, projector: projector.FringeProjector, shifter: shift.PhaseShift, unwrapper: unwrap.PhaseUnwrap, vertical=True):
         raise NotImplementedError
-    
-    def _gather_dc_img(self, camera: camera.Camera, projector: projector.FringeProjector):
-        # Gather a single full intensity DC img
-        return FringeProject(camera, projector, 0.0, [0.0])[0]
 
 # Stereo Methods
 
 class StereoReconstructor(IReconstructor):
     def __init__(self):
         self.m_AlignToCamera = True
+
+        self.m_UseChannel = 0
+
+    @property
+    def useChannel(self):
+        return self.m_UseChannel
+    
+    @useChannel.setter
+    def useChannel(self, value):
+        self.m_UseChannel = value
 
     def GatherPhasemap(self, camera: camera.Camera, projector: projector.FringeProjector, shifter: shift.PhaseShift, unwrapper: unwrap.PhaseUnwrap, vertical=True):
         xp = ProcessingContext().xp
@@ -44,17 +51,15 @@ class StereoReconstructor(IReconstructor):
         unwrapper.vertical = vertical
         shifter.vertical = vertical
 
-        for i, (numStripes, phaseCount) in enumerate(zip(unwrapper.stripeCount, shifter.phaseCounts)):
-            imgs = xp.empty(shape=(phaseCount, *camera.config.resolution), dtype=xp.float32)
+        for i, (numStripes, N) in enumerate(zip(unwrapper.stripeCount, shifter.phaseCounts)):
+            imgs = xp.empty(shape=(N, *camera.config.shape), dtype=xp.float32)
 
-            phases = (xp.arange(phaseCount) / phaseCount) * 2.0 * xp.pi
+            phases = (xp.arange(N) * 2.0 * xp.pi) / N
 
-            for j in range(phaseCount):
+            for j in range(N):
                 imgs[j] = xp.asarray(FringeProject(camera, projector, numStripes, phases[j]).rawData)
 
-            if i == 0: dcImage = DC(imgs)
-
-            shifted[i] = shifter.Shift(imgs)
+            shifted[i], dcImage = shifter.Shift(imgs)
 
         # Calculate unwrapped phase maps
         return unwrapper.Unwrap(shifted), dcImage
@@ -97,7 +102,7 @@ class StereoReconstructor(IReconstructor):
 
         points = xp.dstack([worldX, worldY, worldZ])
 
-        return points.reshape(-1, 3)
+        return points.reshape((*camX.shape[:2], 3))
 
     def Reconstruct(self, cam: camera.Camera, proj: projector.FringeProjector, shifter: shift.PhaseShift, unwrapper: unwrap.PhaseUnwrap, vertical=True):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
@@ -112,40 +117,36 @@ class StereoReconstructor(IReconstructor):
 
         # Gather a phasemap by using the camera and projector
         phasemap, dcImage = self.GatherPhasemap(cam, proj, shifter, unwrapper, vertical=vertical)
-        # Show(dcImage, size=(1600, 900))
-        # ShowPhasemap(phasemap, size=(1600, 900))
 
         # TODO: Check workingResolution with resolution being used
         # So correct scaling can be applied
-        camHeight, camWidth = cam.config.resolution
-        projHeight, projWidth = proj.config.resolution
+        hCam, wCam = cam.config.resolution
+        hProj, wProj = proj.config.resolution
 
-        camX, camY = xp.meshgrid(xp.arange(camWidth, dtype=xp.float32), xp.arange(camHeight, dtype=xp.float32))
+        camY, camX = xp.mgrid[:hCam, :wCam].astype(xp.float32)
+
+        # Select phasemap channel to use - N phasemaps are produced from N channels
+        # We can only use one currently
+        # TODO: Allow for usage of multiple channels
+        if phasemap.ndim == 3: phasemap = phasemap[:, :, self.useChannel]
 
         projCoords = phasemap / (2.0 * xp.pi * unwrapper.stripeCount[-1])
-        projCoords *= (projWidth if vertical else projHeight)
+        projCoords *= (wProj if vertical else hProj)
 
         pc = self.__Triangulate(
             xp.asarray(cam.visionConfig.projectionMat),
-            xp.asarray(proj.visionConfig.projectionMat), 
+            xp.asarray(proj.visionConfig.projectionMat),
             camX, camY, projCoords, vertical
         )
 
         # Find the indices of any NaNs and filter them out
-        validPoints = xp.isnan(pc)
-        invalidPoints = xp.any(validPoints, axis=1)
+        invalidPoints = xp.any(xp.isnan(pc), axis=2)
         validPoints = xp.bitwise_not(invalidPoints)
+
         pc = pc[validPoints]
+        dcImage = dcImage[validPoints] 
 
-        # pc2 = AlwaysNumpy(pc)
-
-        # validPoints = np.isnan(pc2)
-        
-        # validPoints = np.bitwise_not(np.any(validPoints, axis=1))
-        # pc2 = pc2[validPoints]
-
-        # Remove any NaNs for masked values earlier
-        return pc, validPoints
+        return pc, dcImage, validPoints
 
     def AlignCloudToCB(self, pc: np.ndarray, cam: camera.Camera, centre=False):
         if cam.visionConfig is None:

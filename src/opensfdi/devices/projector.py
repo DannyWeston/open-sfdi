@@ -4,9 +4,7 @@ import cv2
 from abc import ABC, abstractmethod
 
 from .vision import VisionConfig
-from ..phase import ShowPhasemap
-
-from ..utils import AlwaysNumpy
+from .. import image, utils
 
 class ProjectorConfig:
     def __init__(self, resolution=(720, 1280), channels=1, throwRatio=1.0, pixelSize=1.0):
@@ -47,6 +45,8 @@ class Projector(ABC):
         self.m_ShouldUndistort = False
         self.m_VisionConfig = visionConfig
 
+        self.m_Debug = False
+
     @property
     def config(self):
         return self.m_Config
@@ -72,6 +72,14 @@ class Projector(ABC):
     @shouldUndistort.setter
     def shouldUndistort(self, value):
         self.m_ShouldUndistort = value
+
+    @property
+    def debug(self):
+        return self.m_Debug
+    
+    @debug.setter
+    def debug(self, value):
+        self.m_Debug = value
 
     @abstractmethod
     def Characterise(self) -> bool:
@@ -115,8 +123,8 @@ class FringeProjector(Projector):
     def stripeRotation(self, value):
         self.m_StripeRotation = value
 
-    def PhaseMatch(self, worldCoords, vertPhasemap, horiPhasemap, numStripes) -> np.ndarray:
-        N = worldCoords.shape[0]
+    def PhaseMatch(self, cameraCoords, vertPhasemap, horiPhasemap, vNumStripes, hNumStripes) -> np.ndarray:
+        N = cameraCoords.shape[0]
 
         h, w = self.config.resolution
 
@@ -124,11 +132,37 @@ class FringeProjector(Projector):
     
         # This algorithm is only suited for CPU completion
         # Could implement tiling of corners for GPU accel, but pointless for now...
-        vertPhasemap = AlwaysNumpy(vertPhasemap)
-        horiPhasemap = AlwaysNumpy(horiPhasemap)
+        vertPhasemap = utils.AlwaysNumpy(vertPhasemap)
+        horiPhasemap = utils.AlwaysNumpy(horiPhasemap)
+
+        for i, (x, y) in enumerate(cameraCoords.astype(int)):
+            projCoords[i, 0] = (vertPhasemap[int(y), int(x)] * w) / (2.0 * np.pi * vNumStripes)
+            projCoords[i, 1] = (horiPhasemap[int(y), int(x)] * h) / (2.0 * np.pi * hNumStripes)
+
+        if self.debug:
+            debugImg = np.zeros((h, w, 3), dtype=np.float32)
+
+            for j, (x2, y2) in enumerate(projCoords):
+                debugImg = cv2.putText(debugImg, str(j), (int(x2), int(y2)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            image.Show(debugImg, name=f"Image: phase matched POIs")
+
+        return projCoords
+
+    def BilinearPhaseMatch(self, cameraCoords, vertPhasemap, horiPhasemap, vNumStripes, hNumStripes) -> np.ndarray:
+        N = cameraCoords.shape[0]
+
+        h, w = self.config.resolution
+
+        projCoords = np.empty((N, 2), dtype=np.float32)
+    
+        # This algorithm is only suited for CPU completion
+        # Could implement tiling of corners for GPU accel, but pointless for now...
+        vertPhasemap = utils.AlwaysNumpy(vertPhasemap)
+        horiPhasemap = utils.AlwaysNumpy(horiPhasemap)
         
         for i in range(N):
-            x, y = worldCoords[i]
+            x, y = cameraCoords[i]
 
             xFrac, xInt = np.modf(x)
             yFrac, yInt = np.modf(y)
@@ -144,7 +178,7 @@ class FringeProjector(Projector):
             vertPhase = (1 - yFrac) * ((1 - xFrac) * vertPhase1 + xFrac * vertPhase2) + \
                 yFrac * ((1 - xFrac) * vertPhase3 + xFrac * vertPhase4)
 
-            projCoords[i, 0] = (vertPhase * w) / (2.0 * np.pi * numStripes)
+            projCoords[i, 0] = (vertPhase * w) / (2.0 * np.pi * vNumStripes)
 
             horiPhase1 = horiPhasemap[yInt, xInt]
             horiPhase2 = horiPhasemap[yInt, xInt + 1]
@@ -154,46 +188,62 @@ class FringeProjector(Projector):
             horiPhase = (1 - yFrac) * ((1 - xFrac) * horiPhase1 + xFrac * horiPhase2) + \
                 yFrac * ((1 - xFrac) * horiPhase3 + xFrac * horiPhase4)
 
-            projCoords[i, 1] = (horiPhase * h) / (np.pi * 2.0 * numStripes)
+            projCoords[i, 1] = (horiPhase * h) / (2.0 * np.pi * hNumStripes)
+
+        if self.debug:
+            debugImg = np.zeros((h, w, 3), dtype=np.float32)
+
+            for j, (x2, y2) in enumerate(projCoords):
+                debugImg = cv2.putText(debugImg, str(j), (int(x2), int(y2)), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            image.Show(debugImg, name=f"Image: phase matched POIs")
 
         return projCoords
 
-    def Characterise(self, worldCoords, cameraCoords, phasemaps, numStripes) -> bool:
+    def Characterise(self, worldCoords, cameraCoords, phasemaps, vNumStripes, hNumStripes) -> bool:
         h, w = self.config.resolution
 
-        pixelCoords = np.empty_like(cameraCoords)
+        projCoords = np.empty_like(cameraCoords)
 
         # Loop through each set of calibration board corner points
-
         for i in range(len(worldCoords)):
-            pixelCoords[i] = self.PhaseMatch(cameraCoords[i], phasemaps[2*i], phasemaps[2*i+1], numStripes)
+            projCoords[i] = self.PhaseMatch(cameraCoords[i], phasemaps[2*i], phasemaps[2*i+1], vNumStripes, hNumStripes)
 
-        # for coords in pixelCoords:
-        #     cornersImage = cv2.drawChessboardCorners(np.zeros(self.config.resolution, dtype=np.float32), (4, 13), coords, True) 
-        #     cornersImage = cv2.circle(cornersImage, coords[0].astype(int), 10, 255, -1)
-        #     Show(cornersImage)
+        # flags = cv2.CALIB_FIX_K3
+        # flags += cv2.CALIB_USE_INTRINSIC_GUESS
 
-        # Optical centre in the middle, focal length in pixels equal to resolution
         # kGuess = np.array([
-        #     [focalX,    0.0,        w / 2],
-        #     [0.0,       focalY,     h-1],
-        #     [0.0,       0.0,        1.0]
+        #     [1110 / 912 * w, 0.00000000e+00, w / 2],
+        #     [0.00000000e+00, 1110 / 570 * h, h - 1],
+        #     [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]
         # ])
 
-        flags = 0
-        # flags |= cv2.CALIB_USE_INTRINSIC_GUESS
-        # flags |= cv2.CALIB_FIX_PRINCIPAL_POINT
+        # reprojErr, K, D, R, T = cv2.calibrateCamera(
+        #     worldCoords, projCoords, (w, h), kGuess, None, flags=flags
+        # )
 
-        reprojErr, K, D, R, T = cv2.calibrateCamera(
-            worldCoords, pixelCoords, (w, h), None, None, flags=flags
-        )
-        
+        # Don't use an intrinsic guess
+        reprojErr, K, D, R, T = cv2.calibrateCamera(worldCoords, projCoords, (w, h), None, None)
+
+        projRotation = cv2.Rodrigues(R[0])[0]
+        projTranslation = T[0].squeeze()
+
+        M0 = utils.TransMat(projRotation, projTranslation)
+
+        boardDeltaTfs = [np.eye(4, 4)]
+        for i in range(1, len(worldCoords)):
+            Mi = utils.TransMat(cv2.Rodrigues(R[i])[0], T[i].squeeze())
+            boardDeltaTfs.append(np.linalg.inv(Mi) @ M0)
+
+        boardDeltaTfs = np.asarray(boardDeltaTfs)
+
         # Calculate projector intrinsic matrix
 
         self.visionConfig = VisionConfig(
-            rotation=cv2.Rodrigues(R[0])[0], translation=T[0],
+            rotation=projRotation, translation=projTranslation,
             intrinsicMat=K, distortMat=D, reprojErr=reprojErr,
-            targetResolution=(h, w), posePOICoords=pixelCoords
+            targetResolution=(h, w), posePOICoords=projCoords,
+            boardPoses=boardDeltaTfs
         )
 
         # errors = []

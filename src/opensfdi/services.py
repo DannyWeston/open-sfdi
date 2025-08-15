@@ -11,7 +11,7 @@ from typing import Generic, Iterator, TypeVar
 from .devices import camera, projector, vision
 
 from . import reconstruction as recon
-from .image import FileImage, Image, ToF32
+from .image import FileImage, Image, ToFloat
 
 
 # Repositories
@@ -119,7 +119,8 @@ class FileVisionConfigRepo(VisionConfigRepo):
                 "DistortMat"        : config.distortMat.tolist(),
                 "ReprojErr"         : config.reprojErr,
                 "TargetResolution"  : list(config.targetResolution),
-                "PosePOICoords"     : config.posePOICoords.tolist()
+                "PosePOICoords"     : config.posePOICoords.tolist(),
+                "BoardPoses"        : config.boardPoses.tolist()
             }
 
             json.dump(data, jsonFile, indent=2)
@@ -138,13 +139,14 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
         # Camera is characterised so make calibrated config
         return vision.VisionConfig(
-            rotation =          np.array(rawJson["Rotation"]),
-            translation =       np.array(rawJson["Translation"]),
-            intrinsicMat =      np.array(rawJson["IntrinsicMat"]).reshape((3, 3)),
-            distortMat =        np.array(rawJson["DistortMat"]),
+            rotation =          np.asarray(rawJson["Rotation"]),
+            translation =       np.asarray(rawJson["Translation"]),
+            intrinsicMat =      np.asarray(rawJson["IntrinsicMat"]).reshape((3, 3)),
+            distortMat =        np.asarray(rawJson["DistortMat"]),
             reprojErr =         rawJson["ReprojErr"],
             targetResolution =  rawJson["TargetResolution"],
-            posePOICoords =     np.array(rawJson["PosePOICoords"])
+            posePOICoords =     np.asarray(rawJson["PosePOICoords"]),
+            boardPoses =        np.asarray(rawJson["BoardPoses"])
         )
 
 
@@ -509,7 +511,7 @@ class FileImageRepo(BaseImageRepo):
         path = self.m_StorageDir / f"{found[0]}.{self.m_FileExt}"
 
         # Save as float32 to disk
-        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToF32(img), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToFloat(img), cv2.COLOR_RGB2BGR))
 
     def Get(self, id: str) -> FileImage:
         found = self.Find(id)
