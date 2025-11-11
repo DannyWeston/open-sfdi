@@ -1,5 +1,7 @@
 import os
 import sys
+import cProfile
+import pstats
 
 import numpy as np
 
@@ -73,12 +75,47 @@ def TransMat(R, T):
     M[:3, 3] = T
     return M
 
-def AlwaysNumpy(arr):
+def ToNumpy(arr):
+    # If type already matches, return
     if type(arr) == np.ndarray:
         return arr
-    
+
     with ProcessingContext.UseGPU(True):
-        return arr.get()
+        xp = ProcessingContext().xp
+
+        return xp.asnumpy(arr)
     
     # We should only get to this point if the type provided is incorrect
     raise Exception("Incorrect type provided (must be numpy or cupy array)")
+    
+def SingleBilinearInterp(img, coords):
+    xp = ProcessingContext().xp
+
+    fracs, integrals = xp.modf(coords)
+    integrals = integrals.astype(xp.uint16)
+
+    # a1 <-> a2 
+    # ^      ^
+    # |      |
+    # v      v
+    # a3 <-> a4
+    a1 = img[integrals[0], integrals[1]]
+    a2 = img[integrals[0], integrals[1] + 1]
+    a3 = img[integrals[0] + 1, integrals[1]]
+    a4 = img[integrals[0] + 1, integrals[1] + 1]
+    
+    x = (1 - fracs[0]) * ((1 - fracs[1]) * a1 + fracs[1] * a2) + fracs[0] * ((1 - fracs[1]) * a3 + fracs[1] * a4)
+
+    return x
+
+@contextmanager
+def ProfileCode(depth=10):
+    try:
+        profiler = cProfile.Profile()
+        profiler.enable()
+        yield
+
+    finally:
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats("cumulative")
+        stats.print_stats(depth)

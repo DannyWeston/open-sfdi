@@ -1,5 +1,3 @@
-import numpy as np
-
 from abc import ABC, abstractmethod
 from skimage.restoration import unwrap_phase
 
@@ -10,74 +8,54 @@ from ..utils import ProcessingContext
 # Phase Unwrapping
 
 class PhaseUnwrap(ABC):
-    def __init__(self, numStripesVertical, numStripesHorizontal=None):
-        self.m_NumStripesVertical = numStripesVertical
-
-        # Allow for different horizontal stripes count to be passed
-        self.m_NumStripesHorizontal = numStripesVertical if numStripesHorizontal is None else numStripesHorizontal
-
-        self.m_Vertical = True
+    def __init__(self):
+        self.m_Debug = False
 
     @property
-    def vertNumStripes(self):
-        return self.m_NumStripesVertical
+    def debug(self):
+        return self.m_Debug
     
-    @property
-    def horiNumStripes(self):
-        return self.m_NumStripesHorizontal
-
-    @property
-    def vertical(self):
-        return self.m_Vertical
-    
-    @vertical.setter
-    def vertical(self, value: bool):
-        self.m_Vertical = value
+    @debug.setter
+    def debug(self, value):
+        self.m_Debug = value
 
     @abstractmethod
-    def Unwrap(self, phasemap):
+    def Unwrap(self, phasemap, **kwargs):
+        raise NotImplementedError
+    
+    @property
+    @abstractmethod
+    def stripeCount(self):
         raise NotImplementedError
 
-    @property
-    def stripeCount(self):
-        return self.vertNumStripes if self.vertical else self.horiNumStripes
-
-    def __iter__(self):
-        return self.stripeCount.__iter__()
-
-    def __next__(self):
-        return self.stripeCount.__next__()
-
-class SpatialPhaseUnwrap(PhaseUnwrap):
-    @abstractmethod
-    def __init__(self, numStripesVertical, numStripesHorizontal=None):
-        super().__init__(numStripesVertical, numStripesHorizontal=numStripesHorizontal)
-
-class TemporalPhaseUnwrap(PhaseUnwrap):
-    @abstractmethod
-    def __init__(self, numStripesVertical, numStripesHorizontal=None):
-        super().__init__(numStripesVertical, numStripesHorizontal=numStripesHorizontal)
-
-class ReliabilityPhaseUnwrap(SpatialPhaseUnwrap):
-    def __init__(self, numStripesVertical, numStripesHorizontal=None, wrapAround=False):
-        super().__init__(numStripesVertical, numStripesHorizonta=numStripesHorizontal)
+class ReliabilityPhaseUnwrap(PhaseUnwrap):
+    def __init__(self, stripeCount: float, wrapAround=False):
+        super().__init__()
 
         self.m_WrapAround = wrapAround
+        self.m_StripeCount = stripeCount
 
     def Unwrap(self, phasemap):
         return unwrap_phase(phasemap, wrap_around=self.m_WrapAround)
+    
+    @property
+    def stripeCount(self):
+        return self.m_StripeCount
 
 class MultiFreqPhaseUnwrap(PhaseUnwrap):
-    def __init__(self, numStripesVertical, numStripesHorizontal=None):
-        super().__init__(numStripesVertical, numStripesHorizontal=numStripesHorizontal)
+    def __init__(self, stripeCount):
+        super().__init__()
+        
+        self.m_StripeCount = stripeCount
 
     def Unwrap(self, phasemaps):
         xp = ProcessingContext().xp
         
         total = len(phasemaps)
 
-        if total < 2: raise Exception("You must pass at least two spatial frquencies to use ")
- 
+        if total < 2: raise Exception("You must pass at least two spatial frquencies to use")
+
+        # Get correct number of stripes used per fringe direction
         numStripes = xp.asarray(self.stripeCount)
         phasemaps = xp.asarray(phasemaps)
 
@@ -90,4 +68,10 @@ class MultiFreqPhaseUnwrap(PhaseUnwrap):
 
             unwrapped = phasemaps[i] + (2.0 * xp.pi * k)
 
+        if self.debug: ShowPhasemap(unwrapped, name="Unwrapped Phasemap")
+
         return unwrapped
+    
+    @property
+    def stripeCount(self):
+        return self.m_StripeCount

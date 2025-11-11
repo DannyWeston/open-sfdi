@@ -5,18 +5,17 @@ import open3d as o3d
 from pathlib import Path
 
 from .devices import camera, board
-from .utils import AlwaysNumpy, ProcessingContext
 
-from . import image
+from . import image, utils
 
 
 def AlignToCalibBoard(pc: np.ndarray, cam: camera.Camera, board: board.CalibrationBoard):
     centreCoords = board.GetBoardCentreCoords()
 
     # Compute inverse transform (camera to checkerboard)
-    R = cam.visionConfig.rotation.T
+    R = cam.characterisation.rotation.T
 
-    t = -R @ cam.visionConfig.translation
+    t = -R @ cam.characterisation.translation
 
     # Shift origin to checkerboard center
     # t = t - R @ centreCoords
@@ -24,13 +23,13 @@ def AlignToCalibBoard(pc: np.ndarray, cam: camera.Camera, board: board.Calibrati
     return (R @ (pc.T + t)).T
 
 def ArrayToCloud(data: np.ndarray, colours=None):
-    data = AlwaysNumpy(data)
+    data = utils.ToNumpy(data)
 
     pc = o3d.geometry.PointCloud()
     pc.points = o3d.utility.Vector3dVector(data)
 
     if colours is not None: 
-       pc = SetCloudColours(pc, colours)
+        pc = SetCloudColours(pc, colours)
 
     return pc
 
@@ -40,12 +39,12 @@ def LoadCloud(filename):
 def SetCloudColours(pc, colours):
     # open3d requires textures to be colour-based (3 channel), and RGB (not BGR like opencv)
     # doesn't support cupy arrays too (GPU-side)
-    xp = ProcessingContext().xp
+    colours = utils.ToNumpy(colours)
 
-    if colours.ndim == 1: 
-        coloursRGB = AlwaysNumpy(colours.reshape(-1, 1) * xp.ones((1, 3)))
+    if colours.ndim == 1:
+        coloursRGB = colours.reshape(-1, 1) * np.ones((1, 3))
     else:
-        coloursRGB = AlwaysNumpy(xp.flip(colours, axis=1))
+        coloursRGB = np.flip(colours, axis=1)
 
     pc.colors = o3d.utility.Vector3dVector(coloursRGB)
 
@@ -73,7 +72,7 @@ def MeshToCloud(mesh, samples=10000):
    return mesh.sample_points_poisson_disk(samples)
 
 def SaveArrayAsCloud(filename: Path, data: np.ndarray):
-    data = AlwaysNumpy(data)
+    data = utils.ToNumpy(data)
 
     with open(filename, "wb") as file:
         file.write(bytes('ply\n', 'utf-8'))

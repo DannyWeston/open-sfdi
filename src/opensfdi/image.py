@@ -5,9 +5,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from abc import ABC
 
-from .devices.vision import VisionConfig
-
-from .utils import ProcessingContext, AlwaysNumpy
+from . import utils
+from .devices.vision import Characterisation
 
 class Image(ABC):
     def __init__(self, data):
@@ -37,11 +36,20 @@ class FileImage(Image):
     def __str__(self):
         return f"{self.m_Path.absolute()}"
 
-def Undistort(img_data, config: VisionConfig):
-    return cv2.undistort(img_data, config.intrinsicMat, config.distortMat, None, config.intrinsicMat)  
+def Undistort(rawData, character: Characterisation):
+    xp = utils.ProcessingContext().xp
+
+    if (character.intrinsicMat is None) or (character.distortMat is None): 
+        return rawData
+    
+    # cv2 needs numpy..
+    rawData = utils.ToNumpy(rawData)
+    rawData = cv2.undistort(rawData, character.intrinsicMat, character.distortMat, None, character.intrinsicMat)  
+
+    return xp.asarray(rawData)
 
 def AddGaussianNoise(rawData, sigma=0.01, mean=0.0, clip=True):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
 
     rawData = xp.asarray(rawData)
     rawData += xp.random.normal(mean, sigma, size=rawData.shape)
@@ -52,7 +60,7 @@ def AddGaussianNoise(rawData, sigma=0.01, mean=0.0, clip=True):
     return rawData
 
 def AddSaltPepperNoise(rawData, saltPercent=0.05, pepperPercent=0.05):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
 
     randNoise = xp.random.rand(*rawData.shape)
 
@@ -67,7 +75,7 @@ def AddSaltPepperNoise(rawData, saltPercent=0.05, pepperPercent=0.05):
     return rawData
 
 def Clip(rawData):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
     
     if rawData.dtype == xp.uint8: rawData = xp.clip(rawData, 0, 255)
     else: rawData = xp.clip(rawData, 0.0, 1.0)
@@ -75,7 +83,7 @@ def Clip(rawData):
     return rawData
 
 def ToGrey(rawData):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
 
     rawData = xp.asarray(rawData)
 
@@ -89,7 +97,7 @@ def ToGrey(rawData):
     raise Exception("Image is in unrecognised format")
 
 def ToFloat(rawData):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
 
     rawData = xp.asarray(rawData)
 
@@ -102,14 +110,14 @@ def ToFloat(rawData):
     raise Exception(f"Image must be in integer format (found {rawData.dtype})")
 
 def ExpandN(rawData, N=3):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
 
     rawData = xp.asarray(rawData)
 
     return xp.dstack([rawData] * N)
 
 def ToU8(rawData):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
 
     if rawData.dtype == xp.uint8:
         return rawData
@@ -119,20 +127,30 @@ def ToU8(rawData):
     
     return (rawData * 255.0).astype(xp.uint8)
 
-def ThresholdMask(rawData, threshold=0.1):
-    xp = ProcessingContext().xp
+def ThresholdMask(rawData, min=0.1, max=0.9):
+    xp = utils.ProcessingContext().xp
 
-    rawData = xp.asarray(rawData.copy())
+    copy = xp.ones_like(rawData, dtype=xp.float32)
 
-    belowMask = rawData < threshold
+    mask = rawData <= min
+    copy[mask] = -1.0
 
-    rawData[belowMask] = 0.0
-    rawData[~belowMask] = 1.0
+    mask = rawData >= max
+    copy[mask] = -1.0
     
-    return rawData
+    return copy
+
+def Normalise(data):
+    xp = utils.ProcessingContext().xp
+
+    a = xp.nanmin(data)
+    b = xp.nanmax(data)
+    data = (data - a) / (b - a)
+
+    return data
 
 def DC(imgs):
-    xp = ProcessingContext().xp
+    xp = utils.ProcessingContext().xp
     
     """ Calculate average intensity across supplied imgs (return uint8 format)"""
     imgs = xp.asarray(imgs)
@@ -161,15 +179,22 @@ def CalculateGamma(rawData: np.ndarray, kernel=(9, 16)):
 
 def Show(rawData, name='Image', wait=0, size=None):
     # cv2 needs numpy
-    rawData = AlwaysNumpy(rawData)
+    rawData = utils.ToNumpy(rawData)
 
-    if cv2.getWindowProperty(name, cv2.WND_PROP_VISIBLE) < 0:
-        cv2.namedWindow(name, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(name, cv2.WINDOW_NORMAL)
 
-    if size is None:
-        h, w = rawData.shape[:2]
-        rawData = cv2.resize(rawData, (int(1000 * (w / h)), 1000))
-    
+    if size is None: 
+        cv2.setWindowProperty(name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        cv2.setWindowProperty(name, cv2.WND_PROP_TOPMOST, 1)
+        _, _, w, h = cv2.getWindowImageRect(name)
+
+        rawData = cv2.resize(rawData, (w, h))
+
+    else: 
+        w, h = size
+        rawData = cv2.resize(rawData, size)
+        cv2.resizeWindow(name, w, h)
+
     cv2.imshow(name, rawData)
     cv2.waitKey(wait)
 

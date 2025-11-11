@@ -109,10 +109,10 @@ class StereoReconstructor(IReconstructor):
 
         xp = ProcessingContext().xp
 
-        if cam.visionConfig is None:
+        if cam.characterisation is None:
             raise Exception("Camera vision is not characterised: you must use a characterised camera for reconstruction")
         
-        if proj.visionConfig is None:
+        if proj.characterisation is None:
             raise Exception("Projector vision is not characterised: you must use a characterised projector for reconstruction")
 
         # Gather a phasemap by using the camera and projector
@@ -134,8 +134,8 @@ class StereoReconstructor(IReconstructor):
         projCoords *= (wProj if vertical else hProj)
 
         pc = self.__Triangulate(
-            xp.asarray(cam.visionConfig.projectionMat),
-            xp.asarray(proj.visionConfig.projectionMat),
+            xp.asarray(cam.characterisation.projectionMat),
+            xp.asarray(proj.characterisation.projectionMat),
             camX, camY, projCoords, vertical
         )
 
@@ -149,11 +149,11 @@ class StereoReconstructor(IReconstructor):
         return pc, dcImage, validPoints
 
     def AlignCloudToCB(self, pc: np.ndarray, cam: camera.Camera, centre=False):
-        if cam.visionConfig is None:
+        if cam.characterisation is None:
             raise Exception("Camera vision is not characterised")
 
-        R = cam.visionConfig.rotation.T
-        t = -cam.visionConfig.rotation.T @ cam.visionConfig.translation
+        R = cam.characterisation.rotation.T
+        t = -cam.characterisation.rotation.T @ cam.characterisation.translation
 
         pc = (R @ pc.T).T + t.ravel()
 

@@ -1,7 +1,8 @@
 import pytest
+import numpy as np
 
 from opensfdi import services, cloud, calibration as calib, reconstruction as recon
-from opensfdi.devices import board, camera, projector
+from opensfdi.devices import board, camera, projector, vision
 from opensfdi.phase import unwrap, shift
 from opensfdi.utils import ProcessingContext
 
@@ -10,60 +11,85 @@ from . import utils
 expRoot = utils.DATA_ROOT / "projector"
 
 resolutions = [
-    (2160, 3840),
-    (1440, 2560),
-    (1080, 1920),
-    (900, 1600),
-    (720, 1280),
-    (540, 960),
-    (360, 640)
+    # (3840, 2160),
+    # (2560, 1440),
+    (1920, 1080),
+    # (1600, 900),
+    # (1280, 720),
+    # (1024, 768)
+    # (960, 540),
+    # (800, 600)
+    # (640, 360)
 ]
 
 objects = [
     "Pillars",
     "Recess",
-    "SpherePlinth",
     "SteppedPyramid"
 ]
 
 # @pytest.mark.skip(reason="Not ready")
 def test_calibration():
-    for (h, w) in resolutions:
-        print(f"Characterising for {w}x{h}")
+    with ProcessingContext.UseGPU(True):
+        phases = [8, 8, 8]
 
-        testRoot = expRoot / f"{w}x{h}"
+        # Camera
+        cam = camera.FileCamera((1080, 1920), channels=1, refreshRate=30.0,
+            character = vision.Characterisation( # Basler ACE
+                focalLengthGuess=(3.6, 3.6),
+                sensorSizeGuess=(3.76, 2.115),
+                opticalCentreGuess=(0.5, 0.5)
+            )
+        )
 
-        imgRepo = services.FileImageRepo(testRoot, useExt='tif')
+        # Phase manipulation
+        shifter = shift.NStepPhaseShift(phases, contrastMask=(0.1, 0.8))  
+        xUnwrapper = unwrap.MultiFreqPhaseUnwrap([1.0, 10.0, 100.0]) # Phase change perpendicular to baseline (x for this scenario)
+        yUnwrapper = unwrap.MultiFreqPhaseUnwrap([1.0, 10.0, 100.0]) # Phase change follows baseline (y for this scenario)  
 
-        with ProcessingContext.UseGPU(True):
-            
-            proj = utils.FakeFPProjector(projector.ProjectorConfig(
-                resolution=(h, w), channels=1,
-                throwRatio=1.4, pixelSize=1.25)
+        # Characterisation board
+        spacing = 0.007778174593052023 * 3
+        calibBoard = board.CircleBoard(
+            circleSpacing=(spacing, spacing),
+            inverted=True, staggered=True,
+            poiCount=(4, 13), poiMask=(0.1, 0.8),
+            areaHint=(100, 10000)
+        )
+
+        calibrator = calib.StereoCharacteriser(calibBoard)
+        def OnCapture(_, numCaptures):
+            calibrator.m_GatheringImages = (numCaptures < 15)
+
+        calibrator.AddCaptureCallback(OnCapture)
+        calibrator.debug = True
+
+        for (w, h) in resolutions:
+            proj = utils.FakeFPProjector(resolution=(h, w), channels=1, refreshRate=30.0,
+                throwRatio=1.0, aspectRatio=1.0,
+                character = vision.Characterisation(
+                    focalLengthGuess=(1.0, 1.0),
+                    sensorSizeGuess=(16.0/9.0, 1.0),
+                    opticalCentreGuess=(0.5, 0.5),
+                    distortMat=np.zeros(5, dtype=np.float32)
+                ),
             )
 
-            cam = camera.FileCamera(camera.CameraConfig((1080, 1920), channels=3))
-            cam.images = list(imgRepo.GetBy(f"calibration", sorted=True))
+            expDir = expRoot / f"{w}x{h}"
+            imgRepo = services.FileImageRepo(expDir, useExt='tif')
 
-            calibBoard = board.CircleBoard(circleSpacing=(0.03, 0.03), poiCount=(4, 13), inverted=True, staggered=True, poiMask=0.1)
+            cam.images = list(imgRepo.GetBy(f"calibration*", sorted=True))
 
-            shifter = shift.NStepPhaseShift([9, 9, 9], mask=0.1)
-            unwrapper = unwrap.MultiFreqPhaseUnwrap(
-                numStripesVertical =    [1.0, 8.0, 64.0],
-                numStripesHorizontal =  [1.0, 8.0, 64.0]
-            )
+            print(f"Characterising for {w}x{h}")
+            calibrator.Characterise(cam, proj, shifter, shifter, xUnwrapper, yUnwrapper)
+            print(f"Finished {w}x{h} characterisation")
 
-            calibrator = calib.StereoCharacteriser(calibBoard)
-            calibrator.Characterise(cam, proj, shifter, unwrapper, poseCount=13)
+            # Save the experiment information and the calibrated camera / projector
+            services.FileCameraRepo(expDir).Add(cam, "camera")
+            services.FileProjectorRepo(expDir).Add(proj, "projector")
 
-        services.FileCameraConfigRepo(testRoot).Add(cam.config, "camera")
-        services.FileProjectorRepo(testRoot).Add(proj.config, "projector")
-
-        visionRepo = services.FileVisionConfigRepo(testRoot)
-        visionRepo.Add(cam.visionConfig, "camera_vision")
-        visionRepo.Add(proj.visionConfig, "projector_vision")
-
-        print(f"Finished {w}x{h} characterisation")
+            visionRepo = services.FileVisionConfigRepo(expDir)
+            visionRepo.Add(cam.characterisation, "camera_vision")
+            visionRepo.Add(proj.characterisation, "projector_vision")
 
 @pytest.mark.skip(reason="Not ready")
 def test_measurement():
@@ -73,11 +99,11 @@ def test_measurement():
         with ProcessingContext.UseGPU(True):
             imageRepo = services.FileImageRepo(testRoot, useExt='tif')
 
-            camRepo = services.FileCameraConfigRepo(testRoot)
+            camRepo = services.FileCameraRepo(testRoot)
             projRepo = services.FileProjectorRepo(testRoot)
             visionRepo = services.FileVisionConfigRepo(testRoot)
             
-            cam = camera.FileCamera(config=camRepo.Get("camera"), visionConfig=visionRepo.Get("camera_vision"))
+            cam = camera.FileCamera(config=camRepo.Get("camera"), character=visionRepo.Get("camera_vision"))
             proj = utils.FakeFPProjector(config=projRepo.Get("projector"), visionConfig=visionRepo.Get("projector_vision"))
 
             reconstructor = recon.StereoReconstructor()

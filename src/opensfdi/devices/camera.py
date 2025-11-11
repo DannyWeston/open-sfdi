@@ -3,13 +3,22 @@ import cv2
 
 from abc import ABC, abstractmethod
 
-from .vision import VisionConfig
+from .vision import Characterisation, ICharacterisable
 from .. import image, utils
 
-class CameraConfig:
-    def __init__(self, resolution, channels):
-        self.m_Resolution = resolution
+
+class Camera(ICharacterisable):
+    @abstractmethod
+    def __init__(self, resolution, channels, refreshRate, character:Characterisation=None):
+        self.m_ShouldUndistort = True
+
+        self.m_Characterisation:Characterisation = character
+
+        self.m_Debug = False
+
         self.m_Channels = channels
+        self.m_Resolution = resolution
+        self.m_RefreshRate = refreshRate
 
     @property
     def channels(self) -> int:
@@ -18,6 +27,10 @@ class CameraConfig:
     @property
     def resolution(self) -> tuple[int, int]:
         return self.m_Resolution 
+    
+    @property
+    def refreshRate(self) -> float:
+        return self.m_RefreshRate
 
     @property
     def shape(self) -> tuple:
@@ -26,30 +39,29 @@ class CameraConfig:
 
         return (*self.resolution, self.channels)
 
-class Camera(ABC):
-    @abstractmethod
-    def __init__(self, config: CameraConfig, visionConfig:VisionConfig=None):
-        self.m_ShouldUndistort = True
-
-        self.m_Config: CameraConfig = config
-        self.m_VisionConfig = visionConfig
-
     @property
-    def visionConfig(self) -> VisionConfig:
-        return self.m_VisionConfig
+    def characterisation(self) -> Characterisation:
+        return self.m_Characterisation
     
-    @visionConfig.setter
-    def visionConfig(self, visionConfig: VisionConfig):
-        self.m_VisionConfig = visionConfig
+    def Characterise(self, worldCoords, poiCoords):
+        extraFlags = cv2.CALIB_FIX_PRINCIPAL_POINT + \
+            cv2.CALIB_FIX_ASPECT_RATIO
 
-    @property
-    def config(self):
-        return self.m_Config
+        # Could return some information about the characterisation
+        return self.characterisation.Calculate(self.resolution, worldCoords, poiCoords, 
+                                        extraFlags=None)
     
-    @config.setter
-    def config(self, value: CameraConfig):
-        # TODO: Maybe add callback?
-        self.m_Config = value
+    @property
+    def debug(self):
+        return self.m_Debug
+
+    @debug.setter
+    def debug(self, value):
+        self.m_Debug = value
+
+    @characterisation.setter
+    def characterisation(self, visionConfig: Characterisation):
+        self.m_Characterisation = visionConfig
 
     @property
     def shouldUndistort(self) -> bool:
@@ -59,47 +71,7 @@ class Camera(ABC):
     def shouldUndistort(self, value):
         self.m_ShouldUndistort = value
 
-    def Characterise(self, worldCoords, pixelCoords):
-        h, w = self.config.resolution
-
-        # flags = cv2.CALIB_USE_INTRINSIC_GUESS
-
-        # fx = 16
-        # fy = 16
-        # sw = 13.13
-        # sh = 8.76
-
-        # kGuess = np.array([
-        #     [fx * w / sw,   0.0,            w / 2],
-        #     [0.0,           fy * h / sh,    h / 2],
-        #     [0.0,           0.0,            1.0]
-        # ])
-
-        # reprojErr, K, D, R, T = cv2.calibrateCamera(
-        #     worldCoords, pixelCoords, (w, h), kGuess, None, flags=flags
-        # )
-
-        reprojErr, K, D, R, T = cv2.calibrateCamera(worldCoords, pixelCoords, (w, h), None, None)
-
-        # Calculate camera extrinsics and board poses using gathered information
-        camRotation = cv2.Rodrigues(R[0])[0]
-        camTranslation = T[0].squeeze()
-
-        M0 = utils.TransMat(camRotation, camTranslation)
-
-        boardDeltaTfs = [np.eye(4, 4)]
-        for i in range(1, len(worldCoords)):
-            Mi = utils.TransMat(cv2.Rodrigues(R[i])[0], T[i].squeeze())
-            boardDeltaTfs.append(np.linalg.inv(Mi) @ M0)
-
-        boardDeltaTfs = np.asarray(boardDeltaTfs)
-
-        self.visionConfig = VisionConfig(
-            rotation=camRotation, translation=camTranslation,
-            intrinsicMat=K, distortMat=D, reprojErr=reprojErr,
-            targetResolution=(h, w), posePOICoords=pixelCoords,
-            boardPoses=boardDeltaTfs
-        )
+    
 
         # errors = []
         # for i in range(len(worldCoords)):
@@ -115,12 +87,7 @@ class Camera(ABC):
         return True
 
     def Undistort(self, img):
-        # Can't undistort image without characterisation
-        # TODO: Add warning
-        if self.visionConfig is None: return img
-        
-        # Optional: New camera matrix (use original K_cam to preserve resolution)
-        return image.Undistort(img, self.visionConfig)
+        return image.Undistort(img, self.characterisation)
 
     @abstractmethod
     def Capture(self) -> image.Image:
@@ -128,8 +95,8 @@ class Camera(ABC):
         raise NotImplementedError
 
 class CV2Camera(Camera):
-    def __init__(self, config: CameraConfig, device, visionConfig: VisionConfig=None):
-        super().__init__(config, visionConfig=visionConfig)
+    def __init__(self,  resolution, channels, refreshRate, device, character: Characterisation=None):
+        super().__init__(resolution, channels, refreshRate, character=character)
 
         self.m_Device = device
         self.m_CameraHandle = None
@@ -153,7 +120,7 @@ class CV2Camera(Camera):
         # Capture an image
         if self.m_CameraHandle is None: 
             self.m_CameraHandle = cv2.VideoCapture(self.device)
-            self.SetActiveResolution(self.config.resolution)
+            self.SetActiveResolution(self.resolution)
         
         ret, rawImage = self.m_CameraHandle.read()
 
@@ -165,7 +132,7 @@ class CV2Camera(Camera):
         rawImage = image.ToFloat(rawImage)
 
         # Convert to grey if needed
-        if self.config.channels == 1:
+        if self.channels == 1:
             rawImage = cv2.cvtColor(rawImage, cv2.COLOR_BGR2GRAY)
 
         if self.shouldUndistort:
@@ -191,8 +158,8 @@ class CV2Camera(Camera):
                 self.m_CameraHandle.release()
 
 class FileCamera(Camera):
-    def __init__(self, config: CameraConfig, visionConfig: VisionConfig=None, images:list[image.FileImage]=None):
-        super().__init__(config, visionConfig=visionConfig)
+    def __init__(self, resolution, channels, refreshRate, character: Characterisation=None, images:list[image.FileImage]=None):
+        super().__init__(resolution, channels, refreshRate, character=character)
 
         self.m_Images = images
 

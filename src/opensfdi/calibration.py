@@ -1,13 +1,14 @@
 import numpy as np
 import time
+import cv2 # TODO: Better
 
 from abc import ABC, abstractmethod
 
-from .phase import unwrap, shift, ShowPhasemap
-from .devices import camera, projector, board, vision, FringeProject
+from .phase import ShowPhasemap, unwrap, shift
+from .devices import camera, projector, board, vision
 from .utils import ProcessingContext
 
-from . import image
+from . import image, utils
 
 class FPCharacteriser(ABC):
     @abstractmethod
@@ -31,6 +32,9 @@ class StereoCharacteriser(FPCharacteriser):
 
         self.m_UseChannel = 0
 
+        self.m_GatheringImages = False
+        self.m_CaptureCallbacks = []
+
     @property
     def useChannel(self):
         return self.m_UseChannel
@@ -39,26 +43,35 @@ class StereoCharacteriser(FPCharacteriser):
     def useChannel(self, value):
         self.m_UseChannel = value
 
-    def GatherPhasemap(self, camera: camera.Camera, projector: projector.FringeProjector, shifter: shift.PhaseShift, unwrapper: unwrap.PhaseUnwrap, vertical=True):
+    def AddCaptureCallback(self, func):
+        self.m_CaptureCallbacks.append(func)
+
+    def RemoveCaptureCallback(self, func):
+        self.m_CaptureCallbacks.remove(func)
+
+    def GatherPhasemap(self, camera: camera.Camera, projector: projector.FringeProjector, shifter: shift.PhaseShift, unwrapper: unwrap.PhaseUnwrap):
         xp = ProcessingContext().xp
         
         # TODO: Add some flag to save the images whilst gathering?
-        shifted = xp.empty((len(unwrapper.stripeCount), *camera.config.shape), dtype=xp.float32)
+        stripeCount = unwrapper.stripeCount
 
-        unwrapper.vertical = vertical
-        shifter.vertical = vertical
+        shifted = xp.empty((len(stripeCount), *camera.shape), dtype=xp.float32)
 
         dcImage = None
 
-        for i, (numStripes, N) in enumerate(zip(unwrapper.stripeCount, shifter.phaseCounts)):
+        for i, (numStripes, N) in enumerate(zip(stripeCount, shifter.phaseCounts)):
 
-            imgs = xp.empty(shape=(N, *camera.config.shape), dtype=xp.float32)
+            imgs = xp.empty(shape=(N, *camera.shape), dtype=xp.float32)
 
             phases = (xp.arange(N) * 2.0 * xp.pi) / N
 
             # TODO: Vectorise
             for j in range(N):
-                rawData = FringeProject(camera, projector, numStripes, phases[j]).rawData
+                projector.numStripes = numStripes
+                projector.phase = phases[j]
+                projector.Display()
+
+                rawData = camera.Capture().rawData
 
                 # Use processing context for image
                 rawData = xp.asarray(rawData)
@@ -72,89 +85,149 @@ class StereoCharacteriser(FPCharacteriser):
             # Use lowest frequency shifted fringes for DC image
             if i == 0: shifted[i], dcImage = shifter.Shift(imgs)
             else: shifted[i], _ = shifter.Shift(imgs)
-                
+
         # Calculate unwrapped phase maps
-        return unwrapper.Unwrap(shifted), dcImage
+        phasemap = unwrapper.Unwrap(shifted)
 
-    def Characterise(self, cam: camera.Camera, proj: projector.FringeProjector, shifter: shift.PhaseShift, unwrapper: unwrap.PhaseUnwrap, poseCount=15):
-        startTime = time.time()
+        return phasemap, dcImage
 
-        phasemaps = []
-        cameraCoords = []
-        objectCoords = []
+    def Characterise(self, cam: camera.Camera, proj: projector.FringeProjector, 
+        xShifter: shift.PhaseShift, yShifter: shift.PhaseShift,
+        xUnwrapper: unwrap.PhaseUnwrap, yUnwrapper: unwrap.PhaseUnwrap):
 
-        boardCoords = self.m_CalibBoard.GetPOICoords()
+        if self.m_GatheringImages:
+            raise Exception("A characterisation is already in progress")
 
-        for i in range(poseCount):
+        xp = ProcessingContext().xp
+
+        dcImages = []
+
+        cameraPOIs = []
+        xPhasemaps = []
+        yPhasemaps = []
+
+        self.m_GatheringImages = True
+
+        # For debugging
+        projImg = np.zeros(shape=(*proj.resolution, 3), dtype=np.float32)
+
+        while self.m_GatheringImages:
             tempTime = time.time()
 
-            # Vertical phase maps
+            # Gather the phasemaps
             proj.stripeRotation = 0.0
-            vertPhasemap, dcImage = self.GatherPhasemap(cam, proj, shifter, unwrapper, vertical=True)
+            xPhasemap, dcImage = self.GatherPhasemap(cam, proj, xShifter, xUnwrapper)
 
-            if self.debug:
-                ShowPhasemap(vertPhasemap)
-                image.Show(dcImage, "DC Image")
+            # ShowPhasemap(xPhasemap, size=(1000, 1000))
 
-            corners = self.m_CalibBoard.FindPOIS(image.ToGrey(dcImage))
-
-            if corners is None:
-                print(f"Could not find checkerboard corners for image {i}")
-                continue
-
-            # Horizontal phase maps (ignore DC image as we don't need it)
             proj.stripeRotation = np.pi / 2.0
-            horiPhasemap, _ = self.GatherPhasemap(cam, proj, shifter, unwrapper, vertical=False)
-            if self.debug: ShowPhasemap(horiPhasemap)
+            yPhasemap, _ = self.GatherPhasemap(cam, proj, yShifter, yUnwrapper) # ignore DC image
 
-            print(f"Successfully identified corners for set {i} ({time.time() - tempTime:.3f}s)")
+            poiCoords = self.m_CalibBoard.FindPOIS(dcImage)
 
-            # Corners successfully detected, register them for characterisation
-            # Default to using first shifted fringes for now
-            # TODO: Add for colour selection or averaging
-            if vertPhasemap.ndim == 3:
-                phasemaps.append(vertPhasemap[:, :, self.useChannel])
-                phasemaps.append(horiPhasemap[:, :, self.useChannel])
+            if poiCoords is None: # Didn't work, skip image
+                print(f"Could not identify POIs, skipping image")
+                continue
+        
+            # Found coords, store results for later
+            print(f"Successfully identified POIs ({time.time() - tempTime:.3f}s)")
+
+            dcImages.append(dcImage)
+            cameraPOIs.append(poiCoords)
+
+            # POIs for camera and projector successfully detected
+            # TODO: Add for colour selection or averaging (and not using only useChannel)
+            if xPhasemap.ndim == 3:
+                xPhasemaps.append(xPhasemap[:, :, self.useChannel])
+                yPhasemaps.append(yPhasemap[:, :, self.useChannel])
             else:
-                phasemaps.append(vertPhasemap)
-                phasemaps.append(horiPhasemap)
+                xPhasemaps.append(xPhasemap)
+                yPhasemaps.append(yPhasemap)
+
+            # Run any post-capture callbacks
+            self.__RunAfterCaptureCallbacks(dcImage, len(dcImages))
+
+        print(f"{len(cameraPOIs)} total valid images captured")
+
+        # We can now characterise the camera
+        cameraPOIs = xp.asarray(cameraPOIs)
+        boardCoords = self.m_CalibBoard.GetPOICoords()
+
+        objectCoords = xp.repeat(boardCoords[xp.newaxis, ...], len(cameraPOIs), axis=0)
+
+        camReprojErrors, camRMSError = cam.Characterise(objectCoords, cameraPOIs)
+        print(f"Camera reprojection error: {camRMSError}")
+
+        if self.debug:
+            camNormErrors = (camReprojErrors - np.min(camReprojErrors)) / np.ptp(camReprojErrors)
+            for i in range(len(cameraPOIs)):
+                self.__ShowPOIs(dcImages[i].copy(), cameraPOIs[i], colourBy=camNormErrors[i])
+
+        # Try to convert the camera POIs coords to projector coords using phase matching
+        # In human terms: the camerea helps the projector "see" the characterisation board
+        projPOIs = xp.empty_like(cameraPOIs)
+        for i in range(len(projPOIs)):
+            # Undistort the images with the now-calibrated camera
+            dcImage = cam.Undistort(dcImages[i])
+            xPhasemap = cam.Undistort(xPhasemaps[i])
+            yPhasemap = cam.Undistort(yPhasemaps[i])
+
+            poiCoords = self.m_CalibBoard.FindPOIS(dcImage)
+
+            # Complete phase-matching so the POI coordinates are converted to projector POV
+            projPOIs[i] = proj.PhaseMatch(poiCoords, xPhasemap, yPhasemap,
+                xUnwrapper.stripeCount[-1], yUnwrapper.stripeCount[-1])
+
+            if self.debug: self.__ShowPhasemaps(xPhasemap, yPhasemap)
+
+        projReprojErrors, projRMSError = proj.Characterise(objectCoords, projPOIs)
+        print(f"Projector reprojection error: {projRMSError}")
+
+        if self.debug:
+            projNormErrors = (projReprojErrors - np.min(projReprojErrors)) / np.ptp(projReprojErrors)
+            for i in range(len(projPOIs)):
+                self.__ShowPOIs(projImg.copy(), projPOIs[i], colourBy=projNormErrors[i])
+
+        # And then.. use these individual characterisations to refine each other
+        systemReprojErr = vision.RefineCharacterisations(cam.characterisation, proj.characterisation, objectCoords)
+        print(f"Total reprojection error: {systemReprojErr}")
+
+    # Private Functions
+
+    def __RunAfterCaptureCallbacks(self, img, numImages):
+        for func in self.m_CaptureCallbacks:
+            func(img, numImages)
+
+    def __ShowPOIs(self, img, poiCoords, colourBy=None):
+        winName = f"Characterisation"
+
+        if len(img.shape) == 2: img = image.ExpandN(img, 3)
+        img = utils.ToNumpy(img)
+
+        poiCoords = utils.ToNumpy(poiCoords)
         
-            cameraCoords.append(corners)
+        if colourBy is not None:
+            # Sort by individual reprojection errors
+            poiCoords = poiCoords[np.argsort(colourBy)]
+            poiCoords = poiCoords.astype(np.uint16)
+
+            for i in range(len(poiCoords)):
+                # colour = (0.0, 1.0, 0.0) if reprojErrs[i] < 0 else (0.0, 0.0, 1.0)
+                colour = (0.0, 1.0 - colourBy[i], float(colourBy[i]))
+                img = cv2.circle(img, poiCoords[i], 1, colour, 2)
         
-        # Never big enough in memory to warrant GPU usage for creation
-        # And cv2 needs np type of data...
-        cameraCoords = np.asarray(cameraCoords)
-        objectCoords = np.repeat(boardCoords[np.newaxis, ...], len(cameraCoords), axis=0)
+        else:
+            for i, (x, y) in enumerate(poiCoords):
+                img = cv2.putText(img, str(i), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 0, 0), 2)
+                img = cv2.circle(img, (x, y), 1, (0, 255, 0), 2)
 
-        # TODO: Change to logger
-        print(f"{len(cameraCoords)} images with POIs correctly identified")
+        image.Show(img, winName)
 
-        # Characterise the camera individually
-        cam.Characterise(objectCoords, cameraCoords)
-        print(f"Camera reprojection error: {cam.visionConfig.reprojErr}")
+    def __ShowPhasemaps(self, xPhasemap, yPhasemap):
+        winName = f"Characterisation"
 
-        # Characterise the projector individually
-        proj.Characterise(objectCoords, cameraCoords, phasemaps, unwrapper.vertNumStripes[-1], unwrapper.horiNumStripes[-1])
-        print(f"Projector reprojection error: {proj.visionConfig.reprojErr}")
+        xPhasemap = utils.ToNumpy(xPhasemap)
+        yPhasemap = utils.ToNumpy(yPhasemap)
 
-        # # Refine the characterisations using each other
-        # cam.visionConfig, proj.visionConfig, reprojErr = vision.RefineCharacterisations(
-        #     cam.visionConfig, proj.visionConfig, objectCoords)
-        # print(f"Total reprojection error: {reprojErr}")
-
-        result = CalibrationResult()
-        result.time_taken = (time.time() - startTime) * 1000
-        result.phi_shifter = shifter.__class__.__name__
-        result.phi_unwrapper = unwrapper.__class__.__name__
-
-        return result
-
-class CalibrationResult:
-    def __init__(self):
-        self.time_taken = None
-        self.phi_unwrapper = None
-        self.phi_shifter = None
-
-        self.number_of_calibration_images = None
-
-# Utility functions
+        ShowPhasemap(xPhasemap, winName)
+        ShowPhasemap(yPhasemap, winName)

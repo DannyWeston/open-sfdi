@@ -38,7 +38,7 @@ def test_calibration():
         with ProcessingContext.UseGPU(True):
             proj = utils.FakeFPProjector(projector.ProjectorConfig(
                 resolution=(1080, 1920), channels=1,
-                throwRatio=1.4, pixelSize=1.25)
+                throwRatio=1.4, aspectRatio=1.25)
             )
 
             cam = camera.FileCamera(camera.CameraConfig((h, w), channels=3))
@@ -56,12 +56,12 @@ def test_calibration():
             calibrator = calib.StereoCharacteriser(calibBoard)
             calibrator.Characterise(cam, proj, shifter, unwrapper, poseCount=13)
 
-        services.FileCameraConfigRepo(testRoot).Add(cam.config, "camera")
+        services.FileCameraRepo(testRoot).Add(cam.config, "camera")
         services.FileProjectorRepo(testRoot).Add(proj.config, "projector")
 
         visionRepo = services.FileVisionConfigRepo(testRoot)
-        visionRepo.Add(cam.visionConfig, "camera_vision")
-        visionRepo.Add(proj.visionConfig, "projector_vision")
+        visionRepo.Add(cam.characterisation, "camera_vision")
+        visionRepo.Add(proj.characterisation, "projector_vision")
 
         print(f"Finished {w}x{h} characterisation")
 
@@ -73,11 +73,11 @@ def test_measurement():
         with ProcessingContext.UseGPU(True):
             imageRepo = services.FileImageRepo(testRoot, useExt='tif')
 
-            camRepo = services.FileCameraConfigRepo(testRoot)
+            camRepo = services.FileCameraRepo(testRoot)
             projRepo = services.FileProjectorRepo(testRoot)
             visionRepo = services.FileVisionConfigRepo(testRoot)
             
-            cam = camera.FileCamera(config=camRepo.Get("camera"), visionConfig=visionRepo.Get("camera_vision"))
+            cam = camera.FileCamera(config=camRepo.Get("camera"), character=visionRepo.Get("camera_vision"))
             proj = utils.FakeFPProjector(config=projRepo.Get("projector"), visionConfig=visionRepo.Get("projector_vision"))
 
             reconstructor = recon.StereoReconstructor()

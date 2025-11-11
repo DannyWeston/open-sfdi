@@ -9,7 +9,7 @@ from tkinter import filedialog
 from opensfdi import calibration, image
 from opensfdi.devices import board
 from opensfdi.phase import unwrap
-from opensfdi.services import FileImageRepo, FileCameraConfigRepo, FileProjectorRepo, save_pointcloud
+from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo, save_pointcloud
 
 
 from cv2 import ocl
@@ -53,7 +53,7 @@ def test_calibration():
       calibrator.Characterise(camera, projector, shifter, unwrapper, poseCount=orientations)
 
       # Save the experiment information and the calibrated camera / projector
-      cam_repo = FileCameraConfigRepo(spacing_path, overwrite=True)
+      cam_repo = FileCameraRepo(spacing_path, overwrite=True)
       proj_repo = FileProjectorRepo(spacing_path, overwrite=True)
 
       cam_repo.Add(camera, "camera")
@@ -86,7 +86,7 @@ def test_measurement():
     path = exp_root / spacing
 
 
-    cam_repo = FileCameraConfigRepo(path, overwrite=True)
+    cam_repo = FileCameraRepo(path, overwrite=True)
     camera: board.FileCamera = cam_repo.Get("camera")
     img_repo = FileImageRepo(path, useExt='.tif', channels=camera.channels)
 

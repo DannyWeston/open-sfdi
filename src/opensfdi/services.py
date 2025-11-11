@@ -45,17 +45,17 @@ class IRepository(ABC, Generic[T]):
 
 # Vision Repositories
 
-class VisionConfigRepo(IRepository[vision.VisionConfig]):
+class VisionConfigRepo(IRepository[vision.Characterisation]):
     @abstractmethod
     def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
 
     @abstractmethod
-    def Get(self, id: str) -> vision.VisionConfig:
+    def Get(self, id: str) -> vision.Characterisation:
         pass
 
     @abstractmethod
-    def GetBy(self, regex, sorted) -> Iterator[vision.VisionConfig]:
+    def GetBy(self, regex, sorted) -> Iterator[vision.Characterisation]:
         pass
 
     @abstractmethod
@@ -63,7 +63,7 @@ class VisionConfigRepo(IRepository[vision.VisionConfig]):
         pass
 
     @abstractmethod
-    def Add(self, config: vision.VisionConfig, id: str) -> None:
+    def Add(self, config: vision.Characterisation, id: str) -> None:
         pass
 
     @abstractmethod
@@ -71,7 +71,7 @@ class VisionConfigRepo(IRepository[vision.VisionConfig]):
         pass
 
     @abstractmethod
-    def Update(self, config: vision.VisionConfig) -> bool:
+    def Update(self, config: vision.Characterisation) -> bool:
         pass
 
 class FileVisionConfigRepo(VisionConfigRepo):
@@ -80,7 +80,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
         self.m_StorageDir = storageDir
 
-    def Get(self, id: str) -> vision.VisionConfig:
+    def Get(self, id: str) -> vision.Characterisation:
         found = self.Find(id, sorted=False)
 
         if len(found) < 1:
@@ -92,7 +92,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
         
         raise Exception("Could not construct vision config")
 
-    def GetBy(self, regex, sorted) -> Iterator[vision.VisionConfig]:
+    def GetBy(self, regex, sorted) -> Iterator[vision.Characterisation]:
         yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
 
     def Find(self, regex: str, sorted) -> list[str]:
@@ -104,7 +104,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
         return files
 
-    def Add(self, config: vision.VisionConfig, id: str) -> None:
+    def Add(self, config: vision.Characterisation, id: str) -> None:
         found = self.Find(id, False)
 
         if 0 < len(found) and (not self.m_Overwrite):
@@ -119,7 +119,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
                 "DistortMat"        : config.distortMat.tolist(),
                 "ReprojErr"         : config.reprojErr,
                 "TargetResolution"  : list(config.targetResolution),
-                "PosePOICoords"     : config.posePOICoords.tolist(),
+                "PosePOICoords"     : config.poiCoords.tolist(),
                 "BoardPoses"        : config.boardPoses.tolist()
             }
 
@@ -129,7 +129,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
         # TODO: Implement
         pass
 
-    def Update(self, config: vision.VisionConfig) -> bool:
+    def Update(self, config: vision.Characterisation) -> bool:
         # TODO: Implement
         pass
 
@@ -138,7 +138,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
             rawJson = json.load(jsonFile)
 
         # Camera is characterised so make calibrated config
-        return vision.VisionConfig(
+        return vision.Characterisation(
             rotation =          np.asarray(rawJson["Rotation"]),
             translation =       np.asarray(rawJson["Translation"]),
             intrinsicMat =      np.asarray(rawJson["IntrinsicMat"]).reshape((3, 3)),
@@ -152,17 +152,17 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
 # Camera Repositories
 
-class BaseCameraConfigRepo(IRepository[vision.VisionConfig]):
+class BaseCameraRepo(IRepository[camera.Camera]):
     @abstractmethod
     def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
 
     @abstractmethod
-    def Get(self, id: str) -> vision.VisionConfig:
+    def Get(self, id: str) -> vision.Characterisation:
         pass
 
     @abstractmethod
-    def GetBy(self, regex, sorted) -> Iterator[vision.VisionConfig]:
+    def GetBy(self, regex, sorted) -> Iterator[vision.Characterisation]:
         pass
 
     @abstractmethod
@@ -170,7 +170,7 @@ class BaseCameraConfigRepo(IRepository[vision.VisionConfig]):
         pass
 
     @abstractmethod
-    def Add(self, config: camera.CameraConfig, id: str) -> None:
+    def Add(self, camera: camera.Camera, id: str) -> None:
         pass
 
     @abstractmethod
@@ -178,29 +178,29 @@ class BaseCameraConfigRepo(IRepository[vision.VisionConfig]):
         pass
 
     @abstractmethod
-    def Update(self, config: camera.CameraConfig) -> bool:
+    def Update(self, camera: camera.Camera) -> bool:
         pass
 
-class FileCameraConfigRepo(BaseCameraConfigRepo):
-    def __init__(self, storage_dir: Path, overwrite=True):
+class FileCameraRepo(BaseCameraRepo):
+    def __init__(self, storageDir: Path, overwrite=True):
         super().__init__(overwrite=overwrite)
 
-        self.m_StorageDir = storage_dir
+        self.m_StorageDir = storageDir
 
-    def Get(self, id: str) -> camera.CameraConfig:
+    def Get(self, id: str) -> camera.Camera:
         found = self.Find(id, sorted=False)
 
         if len(found) < 1:
-            raise Exception(f"Camera config with name '{id}' could not be found on disk")
+            raise Exception(f"Camera with name '{id}' could not be found on disk")
 
-        camera = self.__LoadConfig(id)
+        camera = self.__LoadCamera(id)
 
         if camera: return camera
         
         raise Exception("Could not construct camera")
 
-    def GetBy(self, regex, sorted) -> Iterator[camera.CameraConfig]:
-        yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
+    def GetBy(self, regex, sorted) -> Iterator[camera.Camera]:
+        yield from (self.__LoadCamera(file) for file in self.Find(regex, sorted))
 
     def Find(self, regex: str, sorted) -> list[str]:
         files = [file.stem for file in self.m_StorageDir.glob("*.json")]
@@ -211,7 +211,7 @@ class FileCameraConfigRepo(BaseCameraConfigRepo):
 
         return files
 
-    def Add(self, config: camera.CameraConfig, id: str) -> None:
+    def Add(self, camera: camera.Camera, id: str) -> None:
         found = self.Find(id, False)
 
         if 0 < len(found) and (not self.m_Overwrite):
@@ -220,8 +220,9 @@ class FileCameraConfigRepo(BaseCameraConfigRepo):
         # Save metadata
         with open(self.m_StorageDir / f"{id}.json", "w") as jsonFile:
             data = {
-                "Resolution"    : list(config.resolution),
-                "Channels"      : config.channels
+                "Resolution"    : list(camera.resolution),
+                "Channels"      : camera.channels,
+                "RefreshRate"   : camera.refreshRate,
             }
 
             json.dump(data, jsonFile, indent=2)
@@ -230,32 +231,33 @@ class FileCameraConfigRepo(BaseCameraConfigRepo):
         # TODO: Implement
         pass
 
-    def Update(self, config: camera.CameraConfig) -> bool:
+    def Update(self, camera: camera.Camera) -> bool:
         # TODO: Implement
         pass
 
-    def __LoadConfig(self, name):
+    def __LoadCamera(self, name):
         with open(self.m_StorageDir / f"{name}.json", "r") as jsonFile:
             rawJson = json.load(jsonFile)
 
-        return camera.CameraConfig(
-            tuple(rawJson["Resolution"]), rawJson["Channels"], 
+        return camera.Camera(resolution=tuple(rawJson["Resolution"]), 
+                             channels=rawJson["Channels"], 
+                             refreshRate=rawJson["RefreshRate"],
+                             character=None
         )
-
 
 # Projector Repositories
 
-class BaseProjectorConfigRepo(IRepository[projector.ProjectorConfig]):
+class BaseProjectorRepo(IRepository[projector.Projector]):
     @abstractmethod
     def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
 
     @abstractmethod
-    def Get(self, id: str) -> projector.ProjectorConfig:
+    def Get(self, id: str) -> projector.Projector:
         pass
 
     @abstractmethod
-    def GetBy(self, regex, sorted) -> Iterator[projector.ProjectorConfig]:
+    def GetBy(self, regex, sorted) -> Iterator[projector.Projector]:
         pass
 
     @abstractmethod
@@ -263,7 +265,7 @@ class BaseProjectorConfigRepo(IRepository[projector.ProjectorConfig]):
         pass
 
     @abstractmethod
-    def Add(self, config: projector.ProjectorConfig, id: str) -> None:
+    def Add(self, projector: projector.Projector, id: str) -> None:
         pass
 
     @abstractmethod
@@ -271,29 +273,29 @@ class BaseProjectorConfigRepo(IRepository[projector.ProjectorConfig]):
         pass
 
     @abstractmethod
-    def Update(self, config: projector.ProjectorConfig) -> bool:
+    def Update(self, projector: projector.Projector) -> bool:
         pass
 
-class FileProjectorRepo(BaseProjectorConfigRepo):
+class FileProjectorRepo(BaseProjectorRepo):
     def __init__(self, storageDir: Path, overwrite=True):
         super().__init__(overwrite=overwrite)
 
         self.m_StorageDir = storageDir
 
-    def Get(self, id: str) -> projector.ProjectorConfig:
+    def Get(self, id: str) -> projector.Projector:
         found = self.Find(id, sorted=False)
 
         if len(found) < 1:
-            raise Exception(f"Projector config with name '{id}' could not be found on disk")
+            raise Exception(f"Projector with name '{id}' could not be found on disk")
 
-        config = self.__LoadConfig(id)
+        projector = self.__LoadProjector(id)
 
-        if config: return config
+        if projector: return projector
         
         raise Exception("Could not construct projector")
 
-    def GetBy(self, regex, sorted) -> Iterator[projector.ProjectorConfig]:
-        yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
+    def GetBy(self, regex, sorted) -> Iterator[projector.Projector]:
+        yield from (self.__LoadProjector(file) for file in self.Find(regex, sorted))
 
     def Find(self, regex: str, sorted) -> list[str]:
         files = [file.stem for file in self.m_StorageDir.glob("*.json")]
@@ -304,7 +306,7 @@ class FileProjectorRepo(BaseProjectorConfigRepo):
 
         return files
 
-    def Add(self, config: projector.ProjectorConfig, id: str) -> None:
+    def Add(self, projector: projector.Projector, id: str) -> None:
         found = self.Find(id, False)
 
         if 0 < len(found) and (not self.m_Overwrite):
@@ -313,10 +315,11 @@ class FileProjectorRepo(BaseProjectorConfigRepo):
         # Save metadata
         with open(self.m_StorageDir / f"{id}.json", "w") as json_file:
             data = {
-                "Resolution"    : list(config.resolution),
-                "Channels"      : config.channels,
-                "ThrowRatio"    : config.throwRatio,
-                "PixelSize"     : config.pixelSize
+                "Resolution"    : list(projector.resolution),
+                "Channels"      : projector.channels,
+                "ThrowRatio"    : projector.throwRatio,
+                "AspectRatio"   : projector.aspectRatio,
+                "Channels"      : projector.refreshRate
             }
 
             json.dump(data, json_file, indent=2)
@@ -325,17 +328,21 @@ class FileProjectorRepo(BaseProjectorConfigRepo):
         # TODO: Implement
         pass
 
-    def Update(self, config: projector.FringeProjector) -> bool:
+    def Update(self, projector: projector.FringeProjector) -> bool:
         # TODO: Implement
         pass
 
-    def __LoadConfig(self, name):
+    def __LoadProjector(self, name):
         with open(self.m_StorageDir / f"{name}.json", "r") as jsonFile:
             rawJson = json.load(jsonFile)
 
-            return projector.ProjectorConfig(
-                tuple(rawJson["Resolution"]), rawJson["Channels"],
-                rawJson["ThrowRatio"], rawJson["PixelSize"]
+            return projector.Projector(
+                resolution=tuple(rawJson["Resolution"]), 
+                channels=rawJson["Channels"],
+                refreshRate=rawJson["RefreshRate"],
+                throwRatio=rawJson["ThrowRatio"], 
+                aspectRatio=rawJson["AspectRatio"],
+                character=None
             )
 
 

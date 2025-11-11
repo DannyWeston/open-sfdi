@@ -3,9 +3,7 @@ import cv2
 
 from abc import ABC, abstractmethod
 
-from ..utils import AlwaysNumpy, ProcessingContext
-
-from .. import image
+from .. import image, utils
 
 
 # CalibrationBoard
@@ -71,7 +69,7 @@ class Checkerboard(CalibrationBoard):
         return corners
 
 class CircleBoard(CalibrationBoard):
-    def __init__(self, circleSpacing=(0.03, 0.03), circleDiameter=1.0, poiCount=(4, 13), inverted=True, staggered=True, areaHint=None, poiMask=0.1):
+    def __init__(self, circleSpacing=(0.03, 0.03), circleDiameter=1.0, poiCount=(4, 13), inverted=True, staggered=True, areaHint=None, poiMask=(0.1, 0.9)):
         super().__init__()
         # TODO: Maybe make separate immutable classes for staggered and unstaggered?
         
@@ -105,46 +103,43 @@ class CircleBoard(CalibrationBoard):
         self.m_DetectorParams.blobColor = 255 if inverted else 0
 
     def FindPOIS(self, img):
-        # Sadly some jobs can only be run on the CPU... such as cv2.findCirclesGrid
-        # It is annoying... stupid cv2...
-        # To fix this *you* could implement a custom circle grid finder
-        # - I am too lazy and sleep deprived
-
         # Create a detector with the parameters
         detector = cv2.SimpleBlobDetector_create(self.m_DetectorParams)
 
         flags = cv2.CALIB_CB_CLUSTERING
         flags += cv2.CALIB_CB_ASYMMETRIC_GRID if self.m_Staggered else cv2.CALIB_CB_SYMMETRIC_GRID
 
+        img = image.ToGrey(img)
+
+        # Apply threshold mask if present
+        if self.m_POIMask is not None:
+            img = image.ThresholdMask(img, min=self.m_POIMask[0], max=self.m_POIMask[1])
+
         # Convert to numpy uint8 for cv2
-        img = image.ThresholdMask(img, self.m_POIMask)
         img = image.ToU8(img)
 
-        result, corners = cv2.findCirclesGrid(AlwaysNumpy(img), self.m_POICount, blobDetector=detector, flags=flags)
+        # Some jobs can only be run on the CPU (using np instead of cupy)... cv2.findCirclesGrid is stupid
+        # To fix this you could implement a custom circle grid finder - I am too lazy and sleep deprived
+        # Also, I don't know why, but opencv returns corners in x-y format rather than the usual y-x that
+        # it uses throughout the rest of the shitty library... and contains a stupid redundant dimension!!!
+        # This convention is used for anything to do with characterisation... NOTHING ELSE
 
-        if not result:
-            if self.debug:
-                print("Failed to detect POIs")
-                image.Show(img)
+        img = utils.ToNumpy(img)
 
-            return None
-    
-        corners = corners.reshape(-1, 2)
+        result, corners = cv2.findCirclesGrid(img, self.m_POICount, blobDetector=detector, flags=flags)
+
+        if not result: return None
         
-        if self.debug:
-            h, w = self.m_POICount
+        # Stepped out of forced CPU context, get valid device context back
+        xp = utils.ProcessingContext().xp
+        corners = xp.asarray(corners)
 
-            debugImg = AlwaysNumpy(image.ExpandN(img))
-
-            for j, (x, y) in enumerate(corners):
-                debugImg = cv2.putText(debugImg, str(j), (int(x), int(y)), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 5)
-
-            image.Show(debugImg, name=f"Image: Successfully detected {h*w} POIs")
-
-        return corners
+        return corners.reshape(-1, 2)
 
     def GetPOICoords(self):
         # Multiply by square width
+        xp = utils.ProcessingContext().xp
+
         h, w = self.m_POICount
 
         xDelta = self.m_CircleSpacing[1] / 2
@@ -152,24 +147,26 @@ class CircleBoard(CalibrationBoard):
 
         # Setup checkerboard world coordinates
         if self.m_Staggered:
-            xs, ys = np.mgrid[:w, :h].astype(np.float32)
-            xs *= -xDelta
+            xs, ys = xp.mgrid[:w, :h].astype(xp.float32)
+            xs *= xDelta
 
             ys *= yDelta
             ys[1::2] += yDelta / 2
             
-            zs = np.zeros((h * w), dtype=np.float32)
-            circleCentres = np.vstack([xs.ravel(), ys.ravel(), zs]).T
+            zs = xp.zeros((h * w), dtype=xp.float32)
+            circleCentres = xp.vstack([xs.ravel(), ys.ravel(), zs]).T
         else:
-            circleCentres = np.zeros((w * h, 3), np.float32)
-            circleCentres[:, :2] = np.mgrid[:w, :h].T.reshape(-1, 2) * self.m_CircleSpacing[0]
+            circleCentres = xp.zeros((w * h, 3), xp.float32)
+            circleCentres[:, :2] = xp.mgrid[:w, :h].T.reshape(-1, 2) * self.m_CircleSpacing[0]
 
         return circleCentres
 
     def GetBoardCentreCoords(self) -> np.ndarray:
+        xp = utils.ProcessingContext().xp
+
         # TODO: Implement mechanism for calculating non-staggered centres
         h, w = self.m_POICount
 
         # Assume Z = 0 for a flat board
         # XYZ Format
-        return np.array([(w - 1) * self.m_CircleSpacing[1] / 2, (h - 0.5) * self.m_CircleSpacing[0] / 2, 0.0])
+        return xp.array([(w - 1) * self.m_CircleSpacing[1] / 2, (h - 0.5) * self.m_CircleSpacing[0] / 2, 0.0])

@@ -8,7 +8,7 @@ from tkinter import filedialog
 from opensfdi import calibration
 from opensfdi.devices import board
 from opensfdi.phase import unwrap
-from opensfdi.services import FileImageRepo, FileCameraConfigRepo, FileProjectorRepo, save_pointcloud
+from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo, save_pointcloud
 
 # Initialise tkinter for file browsing
 # TODO: Change this to use paths etc
@@ -78,7 +78,7 @@ def test_calibration():
     calibrator.Characterise(camera, projector, shifter, unwrapper, poseCount=orientations)
 
     # Save the experiment information and the calibrated camera / projector
-    FileCameraConfigRepo(res_path, overwrite=True).Add(camera, "camera")
+    FileCameraRepo(res_path, overwrite=True).Add(camera, "camera")
     FileProjectorRepo(res_path, overwrite=True).Add(projector, "projector")
 
 @pytest.mark.skip(reason="Not ready")
@@ -100,7 +100,7 @@ def test_measurement():
   # Load projector and camera with imgs
   calib_path = Path(filedialog.askdirectory(title="Where is the folder for the optical devices?"))
   
-  cam_repo = FileCameraConfigRepo(calib_path, overwrite=True)
+  cam_repo = FileCameraRepo(calib_path, overwrite=True)
   camera: board.FileCamera = cam_repo.Get("camera")
   img_repo = FileImageRepo(calib_path, useExt='.tif', channels=camera.channels)
 

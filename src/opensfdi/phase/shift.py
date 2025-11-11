@@ -1,30 +1,19 @@
 from abc import ABC, abstractmethod
 
-from ..image import ThresholdMask, Show
+from ..image import ThresholdMask
+
+from . import ShowPhasemap
 
 from ..utils import ProcessingContext
 
 class PhaseShift(ABC):
     @abstractmethod
-    def __init__(self, phiVertical, phiHorizontal=None, contrastMask=0.01):
-        self.m_PhiVertical = phiVertical
-        self.m_PhiHorizontal = phiVertical if phiHorizontal is None else phiHorizontal
-
-        self.m_ContrastMask = contrastMask
-
-        self.m_Vertical = True
-
-    @property
-    def vertical(self):
-        return self.m_Vertical
-    
-    @vertical.setter
-    def vertical(self, value: bool):
-        self.m_Vertical = value
+    def __init__(self, phaseCounts):
+        self.m_PhaseCounts = phaseCounts
     
     @property
     def phaseCounts(self):
-        return self.m_PhiVertical if self.vertical else self.m_PhiHorizontal
+        return self.m_PhaseCounts
 
     @abstractmethod
     def Shift(self, imgs):
@@ -37,18 +26,17 @@ class PhaseShift(ABC):
         return self.phaseCounts.__next__()
 
 class NStepPhaseShift(PhaseShift):
-    def __init__(self, phiVertical, phiHorizontal=None, mask=0.0):
-        super().__init__(phiVertical, phiHorizontal=phiHorizontal, contrastMask=mask)
+    def __init__(self, phaseCounts, contrastMask=(0.0, 1.0)):
+        super().__init__(phaseCounts=phaseCounts)
 
-        if (v := len(phiVertical)) < 3:
-            raise Exception(f"The N-step method requires 3 or more phases ({v} passed for vertical)")
-        
-        if (phiHorizontal is not None) and ((h := len(phiHorizontal)) < 3):
-            raise Exception(f"The N-step method requires 3 or more phases ({h} passed for horizontal)")
+        self.m_ContrastMask = contrastMask
+
+        if (v := len(phaseCounts)) < 3:
+            raise Exception(f"The N-step method requires 3 or more phases ({v} passed)")
 
     def Shift(self, imgs):
         xp = ProcessingContext().xp
-        
+
         N = len(imgs)
 
         # Generate phases (weird reshape for making sure it matches image channel count)
@@ -59,15 +47,22 @@ class NStepPhaseShift(PhaseShift):
         b = xp.sum(xp.cos(phases) * imgs, axis=0)
 
         result = xp.arctan2(a, b)
-        result[result < 0.0] += (xp.pi * 2.0)
 
-        dcImage = (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)
+        # ShowPhasemap(result, size=(1000, 1000))
+
+        dcImage = xp.mean(imgs, axis=0)
+ 
+        acImage = (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)
 
         # Return result if no masking needed
         if self.m_ContrastMask is None:
             return result, dcImage
 
-        contrastMask = ThresholdMask(dcImage, threshold=self.m_ContrastMask)
-        contrastMask[contrastMask == 0.0] = xp.nan # Anything zero set to NaNs
+        mask = ThresholdMask(acImage, 
+            min=self.m_ContrastMask[0], 
+            max=self.m_ContrastMask[1]
+        )
+        
+        mask[mask < 0.0] = xp.nan # Anything zero set to NaNs
 
-        return result * contrastMask, dcImage
+        return result * mask, dcImage
