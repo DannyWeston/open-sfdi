@@ -1,17 +1,13 @@
-import numpy as np
 import cv2
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
-from .vision import Characterisation, ICharacterisable
+from .characterisation import Characterisation, ICharacterisable, CalibrationBoard
 from .. import image, utils
-
 
 class Camera(ICharacterisable):
     @abstractmethod
     def __init__(self, resolution, channels, refreshRate, character:Characterisation=None):
-        self.m_ShouldUndistort = True
-
         self.m_Characterisation:Characterisation = character
 
         self.m_Debug = False
@@ -43,13 +39,13 @@ class Camera(ICharacterisable):
     def characterisation(self) -> Characterisation:
         return self.m_Characterisation
     
-    def Characterise(self, worldCoords, poiCoords):
-        extraFlags = cv2.CALIB_FIX_PRINCIPAL_POINT + \
+    def Characterise(self, board: CalibrationBoard, poiCoords, extraFlags=None):
+        # TODO: add extra flags
+        defaultFlags = cv2.CALIB_FIX_PRINCIPAL_POINT + \
             cv2.CALIB_FIX_ASPECT_RATIO
 
         # Could return some information about the characterisation
-        return self.characterisation.Calculate(self.resolution, worldCoords, poiCoords, 
-                                        extraFlags=None)
+        return self.characterisation.Calculate(board, poiCoords, self.resolution, defaultFlags)
     
     @property
     def debug(self):
@@ -63,16 +59,6 @@ class Camera(ICharacterisable):
     def characterisation(self, visionConfig: Characterisation):
         self.m_Characterisation = visionConfig
 
-    @property
-    def shouldUndistort(self) -> bool:
-        return self.m_ShouldUndistort
-    
-    @shouldUndistort.setter
-    def shouldUndistort(self, value):
-        self.m_ShouldUndistort = value
-
-    
-
         # errors = []
         # for i in range(len(worldCoords)):
         #     points, _ = cv2.projectPoints(
@@ -85,9 +71,6 @@ class Camera(ICharacterisable):
 
         # TODO: Keep all poses
         return True
-
-    def Undistort(self, img):
-        return image.Undistort(img, self.characterisation)
 
     @abstractmethod
     def Capture(self) -> image.Image:
@@ -116,35 +99,42 @@ class CV2Camera(Camera):
         self.m_CameraHandle.set(cv2.CAP_PROP_FRAME_WIDTH, value[1])
         self.m_CameraHandle.set(cv2.CAP_PROP_FRAME_HEIGHT, value[0])
 
-    def Capture(self):
+    def Capture(self) -> image.Image:
+        xp = utils.ProcessingContext().xp
+
         # Capture an image
         if self.m_CameraHandle is None: 
             self.m_CameraHandle = cv2.VideoCapture(self.device)
             self.SetActiveResolution(self.resolution)
         
-        ret, rawImage = self.m_CameraHandle.read()
+        ret, rawImg = self.m_CameraHandle.read()
 
         if not ret:
             # Couldn't capture image, throw exception
             raise Exception("Could not capture an image with the CV2Camera")
         
-        # Must convert to float32, spec!
-        rawImage = image.ToFloat(rawImage)
+        # Use float (spec of program)!
+        rawImg = image.ToFloat(rawImg)
+
+        # Undistort if can
+        rawImg = self.characterisation.Undistort(rawImg)
 
         # Convert to grey if needed
         if self.channels == 1:
-            rawImage = cv2.cvtColor(rawImage, cv2.COLOR_BGR2GRAY)
+            rawImg = cv2.cvtColor(rawImg, cv2.COLOR_BGR2GRAY)
 
-        if self.shouldUndistort:
-            rawImage = self.Undistort(rawImage)
-
-        return image.Image(rawImage)
+        return image.Image(xp.asarray(rawImg))
 
     def ShowFeed(self):
         cv2.namedWindow("Camera feed")
         
         while img := self.Capture():
-            cv2.imshow("Camera feed", img.rawData)
+            rawImg = utils.ToNumpy(img.rawData)
+
+            # Apply undistortion if needed
+            rawImg = self.characterisation.Undistort(rawImg)
+
+            cv2.imshow("Camera feed", rawImg)
 
             key = cv2.waitKey(20)
             if key == 27: # exit on ESC
@@ -173,13 +163,7 @@ class FileCamera(Camera):
 
     def Capture(self) -> image.Image:
         try:
-            # This will invoke the loading of the data from the FileImage (disk) 
-            rawImage = self.m_Images.pop(0).rawData
-
-            # Apply undistortion if needed
-            if self.shouldUndistort:
-                rawImage = self.Undistort(rawImage)
-
-            return image.Image(rawImage)
+            return self.m_Images.pop(0)
+        
         except IndexError:
             return None

@@ -6,7 +6,6 @@ from pathlib import Path
 from abc import ABC
 
 from . import utils
-from .devices.vision import Characterisation
 
 class Image(ABC):
     def __init__(self, data):
@@ -26,27 +25,17 @@ class FileImage(Image):
 
     @property
     def rawData(self):
+        xp = utils.ProcessingContext().xp
+
         # Check if the data needs to be loaded
         if self.m_RawData is None:
             self.m_RawData = cv2.imread(str(self.m_Path.resolve()), flags=cv2.IMREAD_UNCHANGED)
-            self.m_RawData = self.m_RawData.astype(np.float32) / 255.0 # Default to float32
+            self.m_RawData = xp.asarray(self.m_RawData) / xp.iinfo(self.m_RawData.dtype).max # Default to float64
 
         return self.m_RawData
 
     def __str__(self):
         return f"{self.m_Path.absolute()}"
-
-def Undistort(rawData, character: Characterisation):
-    xp = utils.ProcessingContext().xp
-
-    if (character.intrinsicMat is None) or (character.distortMat is None): 
-        return rawData
-    
-    # cv2 needs numpy..
-    rawData = utils.ToNumpy(rawData)
-    rawData = cv2.undistort(rawData, character.intrinsicMat, character.distortMat, None, character.intrinsicMat)  
-
-    return xp.asarray(rawData)
 
 def AddGaussianNoise(rawData, sigma=0.01, mean=0.0, clip=True):
     xp = utils.ProcessingContext().xp
@@ -62,15 +51,19 @@ def AddGaussianNoise(rawData, sigma=0.01, mean=0.0, clip=True):
 def AddSaltPepperNoise(rawData, saltPercent=0.05, pepperPercent=0.05):
     xp = utils.ProcessingContext().xp
 
+    dtype = rawData.dtype
+    if (dtype != xp.float32) or (dtype != xp.float64):
+        raise Exception("rawData must be float-based format") 
+
     randNoise = xp.random.rand(*rawData.shape)
 
     if 0.0 < saltPercent:
         saltMask = randNoise < saltPercent
-        rawData[saltMask] = 1.0 if rawData.dtype == xp.float32 else 255
+        rawData[saltMask] = 1.0
 
     if 0.0 < pepperPercent:
         pepperMask = (randNoise >= saltPercent) & (randNoise < saltPercent + pepperPercent)
-        rawData[pepperMask] = 0.0 if rawData.dtype == xp.float32 else 255
+        rawData[pepperMask] = 0.0
 
     return rawData
 
@@ -101,13 +94,18 @@ def ToFloat(rawData):
 
     rawData = xp.asarray(rawData)
 
-    if rawData.dtype == xp.float32 or (rawData.dtype == xp.float64):
+    dtype = rawData.dtype
+
+    if dtype == xp.float32 or dtype == xp.float64:
         return rawData
 
-    if rawData.dtype == xp.uint8:
-        return rawData.astype(xp.float32) / 255.0
+    if dtype == xp.uint8:
+        return rawData.astype(xp.float32) / xp.iinfo(dtype).max
+
+    if dtype == xp.uint16:
+        return rawData.astype(xp.float64) / xp.iinfo(dtype).max
     
-    raise Exception(f"Image must be in integer format (found {rawData.dtype})")
+    raise Exception(f"Image must be in integer format (found {dtype})")
 
 def ExpandN(rawData, N=3):
     xp = utils.ProcessingContext().xp
@@ -116,29 +114,36 @@ def ExpandN(rawData, N=3):
 
     return xp.dstack([rawData] * N)
 
-def ToU8(rawData):
+def ToInt(rawData):
     xp = utils.ProcessingContext().xp
 
-    if rawData.dtype == xp.uint8:
+    dtype = rawData.dtype
+
+    if dtype == xp.uint8 or dtype == xp.uint16:
         return rawData
-
-    if (rawData.dtype != xp.float32) and (rawData.dtype != xp.float64):
-        raise Exception(f"Image must be in float format (found {rawData.dtype})")
     
-    return (rawData * 255.0).astype(xp.uint8)
+    if dtype == xp.float32:
+        return (rawData * xp.iinfo(xp.uint8).max).astype(xp.uint8)
 
-def ThresholdMask(rawData, min=0.1, max=0.9):
+    if dtype == xp.float64:
+        return (rawData * xp.iinfo(xp.uint16).max).astype(xp.uint16)
+    
+    raise Exception(f"Image must be in float format (found {rawData.dtype})")
+    
+def ThresholdMask(rawData, min=0.1, max=0.9, dtype=None):
     xp = utils.ProcessingContext().xp
 
-    copy = xp.ones_like(rawData, dtype=xp.float32)
+    if dtype is None: dtype = xp.float32
 
-    mask = rawData <= min
-    copy[mask] = -1.0
+    mask = xp.ones_like(rawData, dtype=dtype)
 
-    mask = rawData >= max
-    copy[mask] = -1.0
+    low = rawData <= min
+    mask[low] = 0.0
+
+    high = rawData >= max
+    mask[high] = 0.0
     
-    return copy
+    return mask
 
 def Normalise(data):
     xp = utils.ProcessingContext().xp
@@ -155,7 +160,7 @@ def DC(imgs):
     """ Calculate average intensity across supplied imgs (return uint8 format)"""
     imgs = xp.asarray(imgs)
 
-    return xp.sum(imgs, axis=0, dtype=xp.float32) / len(imgs)
+    return xp.sum(imgs, axis=0) / len(imgs)
 
 def CalculateVignette(rawData: np.ndarray, expectedMax=None):
     if expectedMax is None: expectedMax = rawData.max()

@@ -4,12 +4,12 @@ import open3d as o3d
 
 from pathlib import Path
 
-from .devices import camera, board
+from .devices import camera, characterisation
 
 from . import image, utils
 
 
-def AlignToCalibBoard(pc: np.ndarray, cam: camera.Camera, board: board.CalibrationBoard):
+def AlignToCalibBoard(pc: np.ndarray, cam: camera.Camera, board: characterisation.CalibrationBoard):
     centreCoords = board.GetBoardCentreCoords()
 
     # Compute inverse transform (camera to checkerboard)

@@ -22,11 +22,10 @@ class PhaseUnwrap(ABC):
     @abstractmethod
     def Unwrap(self, phasemap, **kwargs):
         raise NotImplementedError
-    
+
     @property
-    @abstractmethod
     def stripeCount(self):
-        raise NotImplementedError
+        return self.m_StripeCount
 
 class ReliabilityPhaseUnwrap(PhaseUnwrap):
     def __init__(self, stripeCount: float, wrapAround=False):
@@ -38,10 +37,6 @@ class ReliabilityPhaseUnwrap(PhaseUnwrap):
     def Unwrap(self, phasemap):
         return unwrap_phase(phasemap, wrap_around=self.m_WrapAround)
     
-    @property
-    def stripeCount(self):
-        return self.m_StripeCount
-
 class MultiFreqPhaseUnwrap(PhaseUnwrap):
     def __init__(self, stripeCount):
         super().__init__()
@@ -52,26 +47,17 @@ class MultiFreqPhaseUnwrap(PhaseUnwrap):
         xp = ProcessingContext().xp
         
         total = len(phasemaps)
-
         if total < 2: raise Exception("You must pass at least two spatial frquencies to use")
 
         # Get correct number of stripes used per fringe direction
         numStripes = xp.asarray(self.stripeCount)
         phasemaps = xp.asarray(phasemaps)
-
-        unwrapped = phasemaps[0]
-
-        ratios = numStripes[1:] / numStripes[:-1]
-
+ 
         for i in range(1, total):
-            k = xp.round(((unwrapped * ratios[i-1]) - phasemaps[i]) / (2.0 * xp.pi))
+            ratio = numStripes[i] / numStripes[i-1]
+            
+            k = xp.round(((phasemaps[i-1] * ratio) - phasemaps[i]) / (2.0 * xp.pi))
 
-            unwrapped = phasemaps[i] + (2.0 * xp.pi * k)
+            phasemaps[i] += 2.0 * xp.pi * k
 
-        if self.debug: ShowPhasemap(unwrapped, name="Unwrapped Phasemap")
-
-        return unwrapped
-    
-    @property
-    def stripeCount(self):
-        return self.m_StripeCount
+        return phasemaps[-1]

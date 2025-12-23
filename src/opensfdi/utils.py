@@ -90,21 +90,39 @@ def ToNumpy(arr):
     
 def SingleBilinearInterp(img, coords):
     xp = ProcessingContext().xp
+    intCoords = coords.astype(xp.uint16)
+    fracCoords = coords - intCoords
 
-    fracs, integrals = xp.modf(coords)
-    integrals = integrals.astype(xp.uint16)
+    x1 = intCoords[0]
+    x2 = x1 + 1
+    y1 = intCoords[1]
+    y2 = y1 + 1
 
-    # a1 <-> a2 
+    # a1 <-> a2
     # ^      ^
     # |      |
     # v      v
     # a3 <-> a4
-    a1 = img[integrals[0], integrals[1]]
-    a2 = img[integrals[0], integrals[1] + 1]
-    a3 = img[integrals[0] + 1, integrals[1]]
-    a4 = img[integrals[0] + 1, integrals[1] + 1]
+    a1 = img[x1, y1]
+    a2 = img[x1, y2]
+    a3 = img[x2, y1]
+    a4 = img[x2, y2]
     
-    x = (1 - fracs[0]) * ((1 - fracs[1]) * a1 + fracs[1] * a2) + fracs[0] * ((1 - fracs[1]) * a3 + fracs[1] * a4)
+    x = (1 - fracCoords[0]) * ((1 - fracCoords[1]) * a1 + fracCoords[1] * a2) + fracCoords[0] * ((1 - fracCoords[1]) * a3 + fracCoords[1] * a4)
+
+    # pRowUp = int(pRow)
+    # pRowLow = pRowUp + 1
+    # pColLeft = int(pCol)
+    # pColRight = pColLeft + 1
+    # rowRatio = pRow - pRowUp
+    # colRatio = pCol - pColLeft
+
+    # phaseVA = phaseV[pRowUp, pColLeft]
+    # phaseVB = phaseV[pRowUp, pColRight]
+    # phaseVC = phaseV[pRowLow, pColLeft]
+    # phaseVD = phaseV[pRowLow, pColRight]
+    # phaseVP = (1 - rowRatio) * ((1 - colRatio) * phaseVA + colRatio * phaseVB) +\
+    #     rowRatio * ((1 - colRatio) * phaseVC + colRatio * phaseVD)
 
     return x
 

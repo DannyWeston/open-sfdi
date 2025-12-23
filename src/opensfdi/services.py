@@ -8,10 +8,11 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Generic, Iterator, TypeVar
 
-from .devices import camera, projector, vision
-
 from . import reconstruction as recon
-from .image import FileImage, Image, ToFloat
+
+from .devices import camera, projector, characterisation
+
+from .image import FileImage, Image, ToInt
 
 
 # Repositories
@@ -45,17 +46,17 @@ class IRepository(ABC, Generic[T]):
 
 # Vision Repositories
 
-class VisionConfigRepo(IRepository[vision.Characterisation]):
+class VisionConfigRepo(IRepository[characterisation.Characterisation]):
     @abstractmethod
     def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
 
     @abstractmethod
-    def Get(self, id: str) -> vision.Characterisation:
+    def Get(self, id: str) -> characterisation.Characterisation:
         pass
 
     @abstractmethod
-    def GetBy(self, regex, sorted) -> Iterator[vision.Characterisation]:
+    def GetBy(self, regex, sorted) -> Iterator[characterisation.Characterisation]:
         pass
 
     @abstractmethod
@@ -63,7 +64,7 @@ class VisionConfigRepo(IRepository[vision.Characterisation]):
         pass
 
     @abstractmethod
-    def Add(self, config: vision.Characterisation, id: str) -> None:
+    def Add(self, config: characterisation.Characterisation, id: str) -> None:
         pass
 
     @abstractmethod
@@ -71,7 +72,7 @@ class VisionConfigRepo(IRepository[vision.Characterisation]):
         pass
 
     @abstractmethod
-    def Update(self, config: vision.Characterisation) -> bool:
+    def Update(self, config: characterisation.Characterisation) -> bool:
         pass
 
 class FileVisionConfigRepo(VisionConfigRepo):
@@ -80,7 +81,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
         self.m_StorageDir = storageDir
 
-    def Get(self, id: str) -> vision.Characterisation:
+    def Get(self, id: str) -> characterisation.Characterisation:
         found = self.Find(id, sorted=False)
 
         if len(found) < 1:
@@ -92,7 +93,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
         
         raise Exception("Could not construct vision config")
 
-    def GetBy(self, regex, sorted) -> Iterator[vision.Characterisation]:
+    def GetBy(self, regex, sorted) -> Iterator[characterisation.Characterisation]:
         yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
 
     def Find(self, regex: str, sorted) -> list[str]:
@@ -104,7 +105,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
 
         return files
 
-    def Add(self, config: vision.Characterisation, id: str) -> None:
+    def Add(self, config: characterisation.Characterisation, id: str) -> None:
         found = self.Find(id, False)
 
         if 0 < len(found) and (not self.m_Overwrite):
@@ -129,7 +130,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
         # TODO: Implement
         pass
 
-    def Update(self, config: vision.Characterisation) -> bool:
+    def Update(self, config: characterisation.Characterisation) -> bool:
         # TODO: Implement
         pass
 
@@ -138,7 +139,7 @@ class FileVisionConfigRepo(VisionConfigRepo):
             rawJson = json.load(jsonFile)
 
         # Camera is characterised so make calibrated config
-        return vision.Characterisation(
+        return characterisation.Characterisation(
             rotation =          np.asarray(rawJson["Rotation"]),
             translation =       np.asarray(rawJson["Translation"]),
             intrinsicMat =      np.asarray(rawJson["IntrinsicMat"]).reshape((3, 3)),
@@ -158,11 +159,11 @@ class BaseCameraRepo(IRepository[camera.Camera]):
         self.m_Overwrite = overwrite
 
     @abstractmethod
-    def Get(self, id: str) -> vision.Characterisation:
+    def Get(self, id: str) -> characterisation.Characterisation:
         pass
 
     @abstractmethod
-    def GetBy(self, regex, sorted) -> Iterator[vision.Characterisation]:
+    def GetBy(self, regex, sorted) -> Iterator[characterisation.Characterisation]:
         pass
 
     @abstractmethod
@@ -517,8 +518,8 @@ class FileImageRepo(BaseImageRepo):
 
         path = self.m_StorageDir / f"{found[0]}.{self.m_FileExt}"
 
-        # Save as float32 to disk
-        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToFloat(img), cv2.COLOR_RGB2BGR))
+        # Save as float to disk
+        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToInt(img), cv2.COLOR_RGB2BGR))
 
     def Get(self, id: str) -> FileImage:
         found = self.Find(id)

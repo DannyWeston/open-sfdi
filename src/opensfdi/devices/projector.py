@@ -1,12 +1,10 @@
 import numpy as np
 import cv2
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
-from opensfdi.phase import ShowPhasemap
-
-from .vision import Characterisation, ICharacterisable
-from .. import image, utils
+from .characterisation import Characterisation, ICharacterisable, CalibrationBoard
+from .. import utils
 
 class Projector(ICharacterisable):
     @abstractmethod
@@ -26,14 +24,6 @@ class Projector(ICharacterisable):
     @property
     def characterisation(self) -> Characterisation:
         return self.m_Characterisation
-
-    @property
-    def shouldUndistort(self) -> bool:
-        return self.m_ShouldUndistort
-    
-    @shouldUndistort.setter
-    def shouldUndistort(self, value):
-        self.m_ShouldUndistort = value
 
     @property
     def resolution(self) -> tuple[int, int]:
@@ -85,8 +75,6 @@ class FringeProjector(Projector):
         self.m_Phase = phase
         self.m_NumStripes = numStripes
 
-        self.m_BilinearPhaseMatch = True
-
     @property
     def numStripes(self) -> float:
         return self.m_NumStripes
@@ -113,42 +101,41 @@ class FringeProjector(Projector):
     def stripeRotation(self, value):
         self.m_StripeRotation = value
 
-    def PhaseMatch(self, cameraCoords, xPhasemap, yPhasemap, xNumStripes, yNumStripes) -> np.ndarray:
+    def PhaseToCoord(self, cameraCoords, xPhasemap, yPhasemap, xNumStripes, yNumStripes, bilinear=True) -> np.ndarray:
         xp = utils.ProcessingContext().xp
 
         h, w = self.resolution
 
         projCoords = xp.empty_like(cameraCoords)
 
-        xPeriod = w / xNumStripes
-        yPeriod = h / yNumStripes
+        periodX = w / xNumStripes
+        periodY = h / yNumStripes
 
-        for i in range(len(cameraCoords)):
+        for i, coords in enumerate(cameraCoords):
             # opencv shitty x-y convention for characterisation needs to be switched back to y-x for images
-            coords = xp.flip(cameraCoords[i])
+            flipped = xp.flip(coords)
 
-            if self.m_BilinearPhaseMatch: 
-                phiX = utils.SingleBilinearInterp(xPhasemap, coords) # x-coord from xPhasemap
-                phiY = utils.SingleBilinearInterp(yPhasemap, coords) # y-coord from yPhasemap
-            
-            else: # No interp
-                phiX = xPhasemap[*coords]
-                phiY = yPhasemap[*coords]
+            if bilinear:
+                phiX = utils.SingleBilinearInterp(xPhasemap, flipped) # x-coord from xPhasemap
+                phiY = utils.SingleBilinearInterp(yPhasemap, flipped) # y-coord from yPhasemap
 
-            projCoords[i, 0] = (phiX * xPeriod) / (2.0 * xp.pi)
-            projCoords[i, 1] = (phiY * yPeriod) / (2.0 * xp.pi)
+            else:
+                flipped = flipped.astype(xp.uint16)
+                phiX = xPhasemap[*flipped]
+                phiY = yPhasemap[*flipped]
+                
+            projCoords[i, 0] = phiX / xp.pi / 2.0 * periodX
+            projCoords[i, 1] = phiY / xp.pi / 2.0 * periodY
 
         return projCoords
 
-    def Characterise(self, worldCoords, poiCoords):
-        extraFlags = 0
-        extraFlags += cv2.CALIB_FIX_ASPECT_RATIO
-        extraFlags += cv2.CALIB_ZERO_TANGENT_DIST
-        extraFlags += cv2.CALIB_FIX_PRINCIPAL_POINT
-        extraFlags += (cv2.CALIB_FIX_K1 + cv2.CALIB_FIX_K2 + cv2.CALIB_FIX_K3)
+    def Characterise(self, board: CalibrationBoard, poiCoords, extraFlags=0):
+        # extraFlags += cv2.CALIB_FIX_ASPECT_RATIO
+        # extraFlags += cv2.CALIB_FIX_PRINCIPAL_POINT
 
-        # Could return some information about the characterisation
-        return self.characterisation.Calculate(self.resolution, worldCoords, poiCoords, extraFlags=extraFlags)        
+        return self.characterisation.Calculate(board, poiCoords, 
+            self.resolution, extraFlags=extraFlags
+        )
 
     @abstractmethod
     def Display(self):
