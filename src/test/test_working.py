@@ -5,10 +5,10 @@ import pytest
 from pathlib import Path
 from tkinter import filedialog
 
-from opensfdi import calibration
+from opensfdi import stereo
 from opensfdi.devices import board
 from opensfdi.phase import unwrap
-from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo, save_pointcloud
+from opensfdi.services import FileImageRepo, CameraFileRepo, ProjectorFileRepo, save_pointcloud
 
 # Initialise tkinter for file browsing
 # TODO: Change this to use paths etc
@@ -66,7 +66,7 @@ def test_calibration():
 
   for res in resolutions:
     res_path = exp_root / f"{res[0]}x{res[1]}"
-    img_repo = FileImageRepo(res_path, useExt='.tif')
+    img_repo = FileImageRepo(res_path, use_ext='.tif')
     
     camera = board.FileCamera(resolution=res[::-1], channels=1, imgs=list(img_repo.GetBy("calibration", sorted=True)))
 
@@ -74,12 +74,12 @@ def test_calibration():
     area_max = area_min * 4.5
     calib_board = board.CircleBoard(circleSpacing=0.03, poiCount=(4, 13), inverted=True, staggered=True, areaHint=(area_min, area_max))
 
-    calibrator = calibration.StereoCharacteriser(calib_board)
+    calibrator = stereo.ZhangCharacteriser(calib_board)
     calibrator.Characterise(camera, projector, shifter, unwrapper, poseCount=orientations)
 
     # Save the experiment information and the calibrated camera / projector
-    FileCameraRepo(res_path, overwrite=True).Add(camera, "camera")
-    FileProjectorRepo(res_path, overwrite=True).Add(projector, "projector")
+    CameraFileRepo(res_path, overwrite=True).Add(camera, "camera")
+    ProjectorFileRepo(res_path, overwrite=True).Add(projector, "projector")
 
 @pytest.mark.skip(reason="Not ready")
 def test_measurement():
@@ -100,17 +100,17 @@ def test_measurement():
   # Load projector and camera with imgs
   calib_path = Path(filedialog.askdirectory(title="Where is the folder for the optical devices?"))
   
-  cam_repo = FileCameraRepo(calib_path, overwrite=True)
+  cam_repo = CameraFileRepo(calib_path, overwrite=True)
   camera: board.FileCamera = cam_repo.Get("camera")
-  img_repo = FileImageRepo(calib_path, useExt='.tif', channels=camera.channels)
+  img_repo = FileImageRepo(calib_path, use_ext='.tif', channels=camera.channels)
 
-  proj_repo = FileProjectorRepo(calib_path, overwrite=True)
+  proj_repo = ProjectorFileRepo(calib_path, overwrite=True)
   projector: board.FakeProjector = proj_repo.Get("projector")
 
   # Phase related stuff
   shifter = unwrap.NStepPhaseShift(phase_count, shift_mask=shift_mask)
   unwrapper = unwrap.MultiFreqPhaseUnwrap(num_stripes)
-  reconstructor = calibration.StereoProfil()
+  reconstructor = stereo.StereoProfil()
 
   for obj in objects:
     camera.imgs = list(img_repo.GetBy(f"{obj}_", sorted=True))

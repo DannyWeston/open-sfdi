@@ -2,28 +2,10 @@ import os
 import sys
 import cProfile
 import pstats
-
 import numpy as np
 
 from contextlib import contextmanager
-
-# Redirect stdout to /dev/null
-@contextmanager
-def stdout_redirected(to=os.devnull):
-    fd = sys.stdout.fileno()
-
-    def _redirect_stdout(to):
-        sys.stdout.close()
-        os.dup2(to.fileno(), fd)
-        sys.stdout = os.fdopen(fd, 'w')
-
-    with os.fdopen(os.dup(fd), 'w') as old_stdout:
-        with open(to, 'w') as file:
-            _redirect_stdout(to=file)
-        try:
-            yield
-        finally:
-            _redirect_stdout(to=old_stdout)
+from typing import ClassVar, Set
 
 class ProcessingContext:
     __Instance = None
@@ -69,62 +51,103 @@ class ProcessingContext:
     def __str__(self):
         return f"ProcessingContext(UseGPU={self.UseGPU}"
 
+class SerialisableMixin:
+    _type_registry: ClassVar[dict] = {}
+    _exclude_fields: ClassVar[Set[str]] = set()  # Excludes
+    
+    def __init_subclass__(cls):
+        cls._type_registry[cls.__name__] = cls
+        
+        # Merge parent's exclude fields with child's
+        parent_excludes = getattr(super(cls, cls), '_exclude_fields', set())
+        child_excludes = getattr(cls, '_exclude_fields', set())
+        cls._exclude_fields = parent_excludes | child_excludes
+        
+        super().__init_subclass__()
+    
+    def to_dict(self) -> dict:
+        """Convert to dict, excluding specified fields"""
+        data = {}
+        
+        for key, value in self.__dict__.items():
+            # Skip fields in exclude list
+            if key in self._exclude_fields:
+                continue
+
+            # Remove trailing underscores
+            if key.startswith('_'):
+                key = key[1:]
+
+            if hasattr(value, 'to_dict'):
+                d = value.to_dict()
+
+                # Recurse through serialisable children
+                if isinstance(value, SerialisableMixin):
+                    d["__type__"] = value.__class__.__name__
+                
+                data[key] = d
+
+            elif isinstance(value, np.ndarray):
+                data[key] = value.tolist()
+
+            else:
+                data[key] = value
+        
+        data['__type__'] = self.__class__.__name__
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Create object from dict"""
+        type_name = data.pop('__type__')
+
+        subclass = cls._type_registry[type_name]
+
+        vars = dict()
+
+        for key, value in data.items():
+            if isinstance(value, dict) and "__type__" in value:
+                # Found another SerialisableMixin, need to initialise correctly
+                value = SerialisableMixin.from_dict(value)
+
+            vars[key] = value
+
+        return subclass(**vars)
+
+
 def TransMat(R, T):
     M = np.eye(4, 4)
     M[:3, :3] = R
     M[:3, 3] = T
     return M
 
-def ToNumpy(arr):
-    # If type already matches, return
-    if type(arr) == np.ndarray:
+def ToContext(xp, arr):
+    if isinstance(arr, xp.ndarray):
         return arr
-
-    with ProcessingContext.UseGPU(True):
-        xp = ProcessingContext().xp
-
-        return xp.asnumpy(arr)
     
-    # We should only get to this point if the type provided is incorrect
-    raise Exception("Incorrect type provided (must be numpy or cupy array)")
-    
-def SingleBilinearInterp(img, coords):
-    xp = ProcessingContext().xp
-    intCoords = coords.astype(xp.uint16)
-    fracCoords = coords - intCoords
+    # Not matching type so convert
+    if isinstance(arr, np.ndarray):
+        xp.asarray(arr)
+        
+    return arr.get()
 
-    x1 = intCoords[0]
-    x2 = x1 + 1
-    y1 = intCoords[1]
-    y2 = y1 + 1
+# Redirect stdout to /dev/null
+@contextmanager
+def stdout_redirected(to=os.devnull):
+    fd = sys.stdout.fileno()
 
-    # a1 <-> a2
-    # ^      ^
-    # |      |
-    # v      v
-    # a3 <-> a4
-    a1 = img[x1, y1]
-    a2 = img[x1, y2]
-    a3 = img[x2, y1]
-    a4 = img[x2, y2]
-    
-    x = (1 - fracCoords[0]) * ((1 - fracCoords[1]) * a1 + fracCoords[1] * a2) + fracCoords[0] * ((1 - fracCoords[1]) * a3 + fracCoords[1] * a4)
+    def _redirect_stdout(to):
+        sys.stdout.close()
+        os.dup2(to.fileno(), fd)
+        sys.stdout = os.fdopen(fd, 'w')
 
-    # pRowUp = int(pRow)
-    # pRowLow = pRowUp + 1
-    # pColLeft = int(pCol)
-    # pColRight = pColLeft + 1
-    # rowRatio = pRow - pRowUp
-    # colRatio = pCol - pColLeft
-
-    # phaseVA = phaseV[pRowUp, pColLeft]
-    # phaseVB = phaseV[pRowUp, pColRight]
-    # phaseVC = phaseV[pRowLow, pColLeft]
-    # phaseVD = phaseV[pRowLow, pColRight]
-    # phaseVP = (1 - rowRatio) * ((1 - colRatio) * phaseVA + colRatio * phaseVB) +\
-    #     rowRatio * ((1 - colRatio) * phaseVC + colRatio * phaseVD)
-
-    return x
+    with os.fdopen(os.dup(fd), 'w') as old_stdout:
+        with open(to, 'w') as file:
+            _redirect_stdout(to=file)
+        try:
+            yield
+        finally:
+            _redirect_stdout(to=old_stdout)
 
 @contextmanager
 def ProfileCode(depth=10):

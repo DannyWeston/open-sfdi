@@ -6,10 +6,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tkinter import filedialog
 
-from opensfdi import calibration, image
+from opensfdi import image, stereo
 from opensfdi.devices import board
 from opensfdi.phase import unwrap
-from opensfdi.services import FileImageRepo, FileCameraRepo, FileProjectorRepo, save_pointcloud
+from opensfdi.services import FileImageRepo, CameraFileRepo, ProjectorFileRepo, save_pointcloud
 
 
 from cv2 import ocl
@@ -42,19 +42,19 @@ def test_calibration():
 
   shifter = unwrap.NStepPhaseShift(phase_count=phase_count, shift_mask=shift_mask)
   unwrapper = unwrap.MultiFreqPhaseUnwrap(fringe_counts)
-  calibrator = calibration.StereoCharacteriser(calib_board)
+  calibrator = stereo.ZhangCharacteriser(calib_board)
 
   for spacing in spacings:
       # Set correct camera images
       spacing_path = exp_root / spacing
-      img_repo = FileImageRepo(spacing_path, useExt='.tif')
+      img_repo = FileImageRepo(spacing_path, use_ext='.tif')
       camera.imgs = list(img_repo.GetBy("calibration", sorted=True))
 
       calibrator.Characterise(camera, projector, shifter, unwrapper, poseCount=orientations)
 
       # Save the experiment information and the calibrated camera / projector
-      cam_repo = FileCameraRepo(spacing_path, overwrite=True)
-      proj_repo = FileProjectorRepo(spacing_path, overwrite=True)
+      cam_repo = CameraFileRepo(spacing_path, overwrite=True)
+      proj_repo = ProjectorFileRepo(spacing_path, overwrite=True)
 
       cam_repo.Add(camera, "camera")
       proj_repo.Add(projector, "projector")
@@ -80,17 +80,17 @@ def test_measurement():
   # Phase related stuff
   shifter = unwrap.NStepPhaseShift(phase_count, shift_mask=shift_mask)
   unwrapper = unwrap.MultiFreqPhaseUnwrap(num_stripes)
-  reconstructor = calibration.StereoProfil()
+  reconstructor = stereo.StereoProfil()
 
   for spacing in spacings:
     path = exp_root / spacing
 
 
-    cam_repo = FileCameraRepo(path, overwrite=True)
+    cam_repo = CameraFileRepo(path, overwrite=True)
     camera: board.FileCamera = cam_repo.Get("camera")
-    img_repo = FileImageRepo(path, useExt='.tif', channels=camera.channels)
+    img_repo = FileImageRepo(path, use_ext='.tif', channels=camera.channels)
 
-    proj_repo = FileProjectorRepo(path, overwrite=True)
+    proj_repo = ProjectorFileRepo(path, overwrite=True)
     projector: board.FakeProjector = proj_repo.Get("projector")
 
     for obj in objects:

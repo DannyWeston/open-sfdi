@@ -9,11 +9,11 @@ from pathlib import Path
 # @pytest.mark.skip(reason="Not ready")
 def test_calibration():
     expRoot = Path(f"C:\\Users\\Dan\\Desktop\\Digital Twin Demo\\Fake Images")
-    imgRepo = services.FileImageRepo(expRoot, useExt='tif')
+    imgRepo = services.FileImageRepo(expRoot, use_ext='tif')
 
     cam = camera.FileCamera(camera.CameraConfig((3648, 5472), channels=3))
     
-    boardImages = [x.rawData for x in imgRepo.GetBy(f"calibration", sorted=True)]
+    boardImages = [x.raw_data for x in imgRepo.GetBy(f"calibration", sorted=True)]
 
     calibBoard = board.CircleBoard(circleSpacing=(0.03, 0.03), poiCount=(4, 13), inverted=True, staggered=True, poiMask=0.1, areaHint=(2000, 10000))
 
@@ -24,5 +24,5 @@ def test_calibration():
 
     print(f"Camera reprojection error: {cam.characterisation.reprojErr}")
 
-    services.FileCameraRepo(expRoot).Add(cam.config, "camera")
+    services.CameraFileRepo(expRoot).Add(cam.config, "camera")
     services.FileVisionConfigRepo(expRoot).Add(cam.characterisation, "camera_vision")
