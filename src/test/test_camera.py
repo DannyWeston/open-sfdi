@@ -255,26 +255,21 @@ def test_measurement():
                 # Check if we need to mask the shifted fringes using a DC image and thresholds
                 if dc_mask:
                     mask = image.ThresholdMask(dc_img, dc_mask[0], dc_mask[1])
-
-                    dc_img[~mask] = xp.nan
                     phasemap[~mask] = xp.nan
 
                 if ac_mask:
                     mask = image.ThresholdMask(ac_img, ac_mask[0], ac_mask[1])
-
-                    dc_img[~mask] = xp.nan
                     phasemap[~mask] = xp.nan
 
                 # Reconstruct the point cloud
                 np_cloud = stereo_fpp.reconstruct(phasemap, camera, projector, unwrapper.stripe_count[-1], use_x=False)
 
                 # Filter out any values such that z < -25mm or z > +50mm from the origin 
-                z_filter = cloud.FilterCloud(np_cloud, z=(-25, 50))
+                z_filter = cloud.filter_np_cloud(np_cloud, z=(-25, 50))
 
                 np_cloud[~z_filter] = xp.nan
                 dc_img[~z_filter] = xp.nan
 
                 # Save and draw
-                point_cloud = cloud.ArrayToCloud(np_cloud, texture=dc_img / xp.nanmax(dc_img))
-                cloud.DrawCloud(point_cloud)
-                cloud.SaveCloud(test_root / f"{obj_name}.ply", point_cloud)
+                point_cloud = cloud.np_to_cloud(np_cloud, texture=dc_img / xp.nanmax(dc_img))
+                cloud.show_cloud(point_cloud)

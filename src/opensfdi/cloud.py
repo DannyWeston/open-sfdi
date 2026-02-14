@@ -1,51 +1,53 @@
 import struct
 import numpy as np
-import open3d as o3d
 
 from pathlib import Path
 
-from .devices import BaseCamera
+from vedo import Points, show
 
+from .devices import BaseCamera
 from . import characterisation, utils, image
 
+# def AlignToCalibBoard(pc: np.ndarray, cam: BaseCamera, board: characterisation.CalibrationBoard):
+#     centreCoords = board.GetBoardCentreCoords()
 
-def AlignToCalibBoard(pc: np.ndarray, cam: BaseCamera, board: characterisation.CalibrationBoard):
-    centreCoords = board.GetBoardCentreCoords()
+#     # Compute inverse transform (camera to checkerboard)
+#     R = cam.characterisation.rotation.T
 
-    # Compute inverse transform (camera to checkerboard)
-    R = cam.characterisation.rotation.T
+#     t = -R @ cam.characterisation.translation
 
-    t = -R @ cam.characterisation.translation
+#     # Shift origin to checkerboard center
+#     # t = t - R @ centreCoords
 
-    # Shift origin to checkerboard center
-    # t = t - R @ centreCoords
+#     return (R @ (pc.T + t)).T
 
-    return (R @ (pc.T + t)).T
-
-def ArrayToCloud(np_cloud: np.ndarray, texture=None):
+def np_to_cloud(np_cloud: np.ndarray, texture=None):
     xp = utils.ProcessingContext().xp
 
-    # Filter out any NaNs from the point cloud and dc_img
+    # Filter out any NaNs from the point cloud and dc_img    
     nan_points = xp.any(xp.isnan(np_cloud), axis=2)
     valid_points = xp.bitwise_not(nan_points)
     np_cloud = np_cloud[valid_points]
-    texture = texture[valid_points]
 
-    # open3d needs to use CPU context only
+    if texture is not None:
+        texture = texture[valid_points]
+        texture = image.ToInt(np.column_stack([texture, texture, texture]))
+
+    # Need array on CPU
     with utils.ProcessingContext.UseGPU(False):
         xp = utils.ProcessingContext().xp
 
         np_cloud = utils.ToContext(xp, np_cloud)
+        texture = utils.ToContext(xp, texture)
 
-        pc = o3d.geometry.PointCloud()
-        pc.points = o3d.utility.Vector3dVector(np_cloud)
+        point_cloud = Points(np_cloud)
 
-        if texture is not None: 
-            pc = SetCloudColours(pc, texture)
+        if texture is not None:
+            point_cloud.pointcolors = texture
 
-        return pc
+        return point_cloud
 
-def FilterCloud(cloud, x=None, y=None, z=None):
+def filter_np_cloud(cloud, x=None, y=None, z=None):
     xp = utils.ProcessingContext().xp
 
     # Stop pointless alloc below :)
@@ -62,51 +64,13 @@ def FilterCloud(cloud, x=None, y=None, z=None):
 
     return mask
 
-def LoadCloud(filename):
-    return o3d.io.read_point_cloud(filename)
+def show_cloud(cloud: Points, point_size=2):
+    show(cloud.ps(point_size))
 
-def SetCloudColours(pc, colours):
-    # open3d requires textures to be colour-based (3 channel), and RGB (not BGR like opencv)
-    # doesn't support cupy arrays too (GPU-side)
-    with utils.ProcessingContext.UseGPU(False):
-        xp = utils.ProcessingContext().xp
+# def LoadCloud(filename):
+#     return o3d.io.read_point_cloud(filename)
 
-        colours = utils.ToContext(xp, colours)
-
-        if colours.ndim == 1:
-            coloursRGB = colours.reshape(-1, 1) * np.ones((1, 3))
-        else:
-            coloursRGB = np.flip(colours, axis=1)
-
-        pc.colors = o3d.utility.Vector3dVector(coloursRGB)
-
-    return pc
-
-def DrawClouds(pointclouds):
-    vis = o3d.visualization.Visualizer()
-    vis.create_window()
-
-    for pc in pointclouds:
-        vis.add_geometry(pc)
-
-    # Add coordinate axis
-
-    vis.run()
-    vis.destroy_window()
-
-def DrawCloud(cloud):
-    o3d.visualization.draw_geometries([cloud])
-
-def LoadMesh(filepath):
-    return o3d.io.read_triangle_mesh(filepath)
-
-def MeshToCloud(mesh, samples=10000):
-   return mesh.sample_points_poisson_disk(samples)
-
-def SaveCloud(filename: Path, point_cloud):
-    o3d.io.write_point_cloud(filename, point_cloud)
-
-def SaveArrayAsCloud(filename: Path, data):
+def save_np_as_ply(filename: Path, data):
     with utils.ProcessingContext.UseGPU(False):
         xp = utils.ProcessingContext().xp
 

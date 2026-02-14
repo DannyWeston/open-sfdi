@@ -227,9 +227,9 @@ def test_measurement():
                 )
 
                 # Remove values that exceed the measureable volume
-                point_cloud, z_filter = cloud.FilterCloud(point_cloud, z=(-25, 50))
+                point_cloud, z_filter = cloud.filter_np_cloud(point_cloud, z=(-25, 50))
                 texture = texture[z_filter]
 
                 # Save and draw
-                cloud.SaveArrayAsCloud(test_root / f"{obj_name}.ply", point_cloud)
-                cloud.DrawCloud(cloud.ArrayToCloud(point_cloud, texture=texture))
+                cloud.save_np_as_ply(test_root / f"{obj_name}.ply", point_cloud)
+                cloud.DrawCloud(cloud.np_to_cloud(point_cloud, texture=texture))

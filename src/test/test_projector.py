@@ -232,9 +232,9 @@ def test_measurement():
         # measurementCloud[:, 1] *= -1 # Flip
 
         # Remove values that exceed the measureable volume
-        measurementCloud, heightFilter = cloud.FilterCloud(measurementCloud, z=(-25, 50))
+        measurementCloud, heightFilter = cloud.filter_np_cloud(measurementCloud, z=(-25, 50))
         dcImage = dcImage[heightFilter]
 
         # Save and draw
         # cloud.SaveArrayAsCloud(testRoot / f"{obj}.ply", measurementCloud)
-        cloud.DrawCloud(cloud.ArrayToCloud(measurementCloud, texture=dcImage))
+        cloud.DrawCloud(cloud.np_to_cloud(measurementCloud, texture=dcImage))
