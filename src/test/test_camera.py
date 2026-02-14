@@ -15,15 +15,16 @@ resolutions = [
     # (960, 540),
     # (1200, 675),
     # (1440, 810),
-    (1920, 1080),
+    # (1920, 1080),
     # (2560, 1440),
-    # (3840, 2160),
+    (3840, 2160),
 ]
 
 objects = [
-    "Pillars",
-    "Recess",
-    "SteppedPyramid"
+    # "Pillars",
+    "PillarsB",
+    # "Recess",
+    # "SteppedPyramid"
 ]
 
 @pytest.mark.skip(reason="Not ready")
@@ -212,7 +213,7 @@ def test_calibration():
             joint_repo.Add(joint_char, "joint_char")
             print()
 
-@pytest.mark.skip(reason="Not ready")
+# @pytest.mark.skip(reason="Not ready")
 def test_measurement():
     with utils.ProcessingContext.UseGPU(True):
         xp = utils.ProcessingContext().xp
@@ -220,7 +221,7 @@ def test_measurement():
         shifter = phase.NStepPhaseShift([12, 12, 12])
         unwrapper = phase.MultiFreqPhaseUnwrap([1.0, 8.0, 64.0])
 
-        dc_mask = (1.0 / 3.0, 1.0)
+        dc_mask = (1.0/3.0, 1.0)
         ac_mask = (0.2, 1.0)
 
         for (w, h) in resolutions:

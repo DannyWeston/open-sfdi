@@ -249,15 +249,8 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
     _exclude_fields = {'_debug', '_should_undistort'}
 
     @abstractmethod
-    def __init__(self, resolution, channels, refresh_rate, throw_ratio, aspect_ratio, char:ch.ZhangChar=None):
+    def __init__(self, char:ch.ZhangChar=None):
         self._char = char
-
-        self._resolution = resolution
-        self._channels = channels
-        self._refresh_rate = refresh_rate
-
-        self._aspect_ratio = aspect_ratio
-        self._throw_ratio = throw_ratio
 
         self._should_undistort = True
         self._debug = False
@@ -267,24 +260,30 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
         return self._char
 
     @property
+    @abstractmethod
     def resolution(self) -> tuple[int, int]:
-        return self._resolution
+        raise NotImplementedError
     
     @property
+    @abstractmethod
     def channels(self) -> int:
-        return self._channels
+        raise NotImplementedError
+
     
     @property
+    @abstractmethod
     def refresh_rate(self) -> float:
-        return self._refresh_rate
+        raise NotImplementedError
 
     @property
+    @abstractmethod
     def throw_ratio(self) -> float:
-        return self._throw_ratio
+        raise NotImplementedError
     
     @property
+    @abstractmethod
     def aspect_ratio(self) -> float:
-        return self._aspect_ratio
+        raise NotImplementedError
     
     @property
     def shape(self):
