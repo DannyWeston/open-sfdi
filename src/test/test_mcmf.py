@@ -118,7 +118,7 @@ def test_calibration():
             # ShowPhasemap(phiX)
 
             pois = calib_board.find_pois(camImg)
-            characterisation.ShowPOIs(camImg.copy(), calib_board._poi_count, pois)
+            characterisation.show_pois(camImg.copy(), calib_board._poi_count, pois)
 
             # Get y phasemap as successful
             phiY, _ = calibrator.Measure(camera, projector, yShifter, yUnwrapper, fringeRot + (np.pi / 2.0), reverse=True)

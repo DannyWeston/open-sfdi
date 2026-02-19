@@ -6,7 +6,7 @@ import cv2
 from abc import ABC, abstractmethod
 from . import image, utils, colour
 
-def ShowPOIs(img, poi_count, poiCoords, size=None, colourBy=None):
+def show_pois(img, poi_count, poi_coords, size=None, colour_by=None):
     winName = f"Detected POIs"
 
     with utils.ProcessingContext.UseGPU(False):
@@ -16,122 +16,129 @@ def ShowPOIs(img, poi_count, poiCoords, size=None, colourBy=None):
         if len(img.shape) == 2: 
             img = image.ExpandN(img, 3)
 
-        poiCoords = utils.ToContext(xp, poiCoords)
+        poi_coords = utils.ToContext(xp, poi_coords)
         
-        if colourBy is not None:
-            colourBy = utils.ToContext(xp, colourBy)
-            colourBy = image.Normalise(colourBy)
+        if colour_by is not None:
+            colour_by = utils.ToContext(xp, colour_by)
+            colour_by = image.Normalise(colour_by)
 
             # Sort by individual reprojection errors
-            poiCoords = poiCoords[np.argsort(colourBy)]
-            poiCoords = poiCoords.astype(np.uint16)
+            poi_coords = poi_coords[np.argsort(colour_by)]
+            poi_coords = poi_coords.astype(np.uint16)
 
-            for i in range(len(poiCoords)):
+            for i in range(len(poi_coords)):
                 # colour = (0.0, 1.0, 0.0) if reprojErrs[i] < 0 else (0.0, 0.0, 1.0)
-                colour = (0.0, 1.0 - colourBy[i], float(colourBy[i]))
-                img = cv2.circle(img, poiCoords[i], 3, colour, -1)
+                colour = (0.0, 1.0 - colour_by[i], float(colour_by[i]))
+                img = cv2.circle(img, poi_coords[i], 3, colour, -1)
         
         else:
             # for i, (x, y) in enumerate(poiCoords):
             #     img = cv2.circle(img, (int(x), int(y)), 5, (0, 255, 0), -1, cv2.FILLED)
 
             img = image.ToInt(img)
-            img = cv2.drawChessboardCorners(img.copy(), poi_count[::-1], poiCoords, True)
+            img = cv2.drawChessboardCorners(img.copy(), poi_count, poi_coords, True)
 
         image.show_img(img, winName, size=size)
 
 
 # Characterisation Boards
 
-class CalibrationBoard(ABC):
+class CharacterisationBoard(ABC):
     def __init__(self, poi_count):
         self._poi_count = poi_count
         
-        self.m_Debug = False
+        self._debug = False
     
     @property
     def debug(self):
-        return self.m_Debug
+        return self._debug
     
     @debug.setter
     def debug(self, value):
-        self.m_Debug = value
+        self._debug = value
 
     @property
     def poi_count(self):
         return self._poi_count
-
+    
     @abstractmethod
     def find_pois(self, img: np.ndarray):
         raise NotImplementedError
     
     @abstractmethod
-    def GetPOICoords(self):
+    def get_poi_coords(self):
         raise NotImplementedError
     
     @abstractmethod
-    def GetBoardCentreCoords(self) -> np.ndarray:
+    def get_board_centre_coords(self) -> np.ndarray:
         raise NotImplementedError
 
-class Checkerboard(CalibrationBoard):
-    def __init__(self, poi_count=(7, 10), squareWidth=0.018):
+class Checkerboard(CharacterisationBoard):
+    def __init__(self, poi_count=(7, 10), square_size=(0.018, 0.018)):
         super().__init__(poi_count)
 
-        self.m_SquareWidth = squareWidth
+        self._square_size = square_size
+
+    @property
+    def square_size(self):
+        return self._square_size
 
     def find_pois(self, img: np.ndarray):
         # Change image to int if not already
-        uint_img = image.ToInt(img)
+        img = image.ToInt(img)
 
         # flags = cv2.CALIB_CB_EXHAUSTIVE
         # result, corners = cv2.findChessboardCornersSB(uint_img, cb_size, flags=flags)
         # if not result: return None
 
-        flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_EXHAUSTIVE
-        result, corners = cv2.findChessboardCorners(uint_img, self._poi_count, flags=flags)
+        with utils.ProcessingContext.UseGPU(False):
+            xp = utils.ProcessingContext().xp
 
-        if not result: return None
+            img = utils.ToContext(xp, img)
 
-        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.01)
-        corners = cv2.cornerSubPix(uint_img, corners, (5, 5), (-1, -1), criteria)
+            flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_EXHAUSTIVE 
+            result, corners = cv2.findChessboardCorners(img, self.poi_count, flags=flags)
+
+            if not result: return None
+
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.01)
+            corners = cv2.cornerSubPix(img, corners, (5, 5), (-1, -1), criteria)
 
         return corners.squeeze()
 
-    def GetPOICoords(self, dtype=None):
+    def get_poi_coords(self, dtype=None):
         xp = utils.ProcessingContext().xp
 
-        h, w = self._poi_count
+        w, h = self.poi_count
 
         if dtype is None: dtype = xp.float32
 
-        xs, ys = xp.meshgrid(xp.arange(h), xp.arange(w))
-        xs = xs.astype(dtype) * self.m_SquareWidth
-        ys = ys.astype(dtype) * self.m_SquareWidth
-            
-        zs = xp.zeros((h * w), dtype=dtype)
-        pois = xp.vstack([xs.ravel(), ys.ravel(), zs]).T
+        ys, xs = xp.mgrid[:h, :w].astype(dtype)
+        xs *= self._square_size[0]
+        ys *= self._square_size[1]
+        zs = xp.zeros(w * h, dtype=dtype)
 
-        return pois
+        return xp.vstack([xs.ravel(), ys.ravel(), zs]).T
 
-    def GetBoardCentreCoords(self, dtype=None) -> np.ndarray:
+    def get_board_centre_coords(self, dtype=None) -> np.ndarray:
         xp = utils.ProcessingContext().xp
 
         if dtype is None: dtype = xp.float32
 
         h, w = self._poi_count
         corners = xp.zeros((w * h, 3), dtype=dtype)
-        corners[:, :2] = np.mgrid[:h, :w].T.reshape(-1, 2) * self.m_SquareWidth
+        corners[:, :2] = np.mgrid[:h, :w].T.reshape(-1, 2) * self._square_size
 
         return corners
 
-class CircleBoard(CalibrationBoard):
+class CircleBoard(CharacterisationBoard):
     def __init__(self, poi_count=(7, 10), spacing=(0.03, 0.03), circleDiameter=1.0, inverted=True, staggered=True, area_max=None, poi_mask=None):
         super().__init__(poi_count)
 
         self.m_CircleDiameter = circleDiameter
-        self.m_CircleSpacing = spacing
+        self._spacing = spacing
 
-        self.m_Staggered = staggered
+        self._staggered = staggered
         self.m_Inverted = inverted
 
         self._poi_mask = poi_mask
@@ -168,7 +175,7 @@ class CircleBoard(CalibrationBoard):
         detector = cv2.SimpleBlobDetector_create(self.m_DetectorParams)
 
         flags = cv2.CALIB_CB_CLUSTERING
-        flags |= (cv2.CALIB_CB_ASYMMETRIC_GRID if self.m_Staggered else cv2.CALIB_CB_SYMMETRIC_GRID)
+        flags |= (cv2.CALIB_CB_ASYMMETRIC_GRID if self._staggered else cv2.CALIB_CB_SYMMETRIC_GRID)
 
         # Convert to single channel
         img = image.ToGrey(img)
@@ -195,40 +202,30 @@ class CircleBoard(CalibrationBoard):
             # STUPID OPENCV DOESN'T SUPPORT UINT16s SO CONVERT IF NEEDED...
             # cv2.convertScaleAbs(img, dst=img, alpha=(xp.iinfo(xp.uint8).max / xp.iinfo(img.dtype).max))
 
-            result, corners = cv2.findCirclesGrid(img, self.poi_count[::-1], blobDetector=detector, flags=flags)
+            result, corners = cv2.findCirclesGrid(img, self.poi_count, blobDetector=detector, flags=flags)
 
             if not result: return None
 
             return xp.asarray(corners).reshape(-1, 2)
 
-    def GetPOICoords(self, dtype=None):
+    def get_poi_coords(self, dtype=None):
         # Multiply by square width
         xp = utils.ProcessingContext().xp
 
         if dtype is None: dtype = xp.float32
 
-        w, h = self._poi_count
+        w, h = self.poi_count
 
-        xDelta = self.m_CircleSpacing[0]
-        yDelta = self.m_CircleSpacing[1]
+        x_delta = self._spacing[0]
+        y_delta = self._spacing[1]
 
-        # Setup checkerboard world coordinates
-        if self.m_Staggered:
-            xs, ys = xp.mgrid[:w, :h].astype(dtype)
-            xs *= xDelta
+        ys, xs = xp.mgrid[:h, :w].astype(dtype)
+        xs *= x_delta
+        ys *= (y_delta / 2) if self._staggered else y_delta
+        
+        return xp.vstack([xs.ravel(), ys.ravel(), xp.zeros(w * h, dtype=dtype)]).T
 
-            ys *= yDelta
-            ys[1::2] += yDelta / 2
-            
-            zs = xp.zeros((h * w), dtype=dtype)
-            circleCentres = xp.vstack([xs.ravel(), ys.ravel(), zs]).T
-        else:
-            circleCentres = xp.zeros((w * h, 3), dtype=dtype)
-            circleCentres[:, :2] = xp.mgrid[:w, :h].T.reshape(-1, 2) * self.m_CircleSpacing[0]
-
-        return circleCentres
-
-    def GetBoardCentreCoords(self) -> np.ndarray:
+    def get_board_centre_coords(self) -> np.ndarray:
         xp = utils.ProcessingContext().xp
 
         # TODO: Implement mechanism for calculating non-staggered centres
@@ -236,43 +233,10 @@ class CircleBoard(CalibrationBoard):
 
         # Assume Z = 0 for a flat board
         # XYZ Format
-        return xp.array([(w - 1) * self.m_CircleSpacing[1] / 2, (h - 0.5) * self.m_CircleSpacing[0] / 2, 0.0])
+        return xp.array([(w - 1) * self._spacing[1] / 2, (h - 0.5) * self._spacing[0] / 2, 0.0])
 
-# Characteriser Class
 
-class ZhangCharacteriser:
-    def __init__(self, calib_board: CalibrationBoard, gamma_corrector:colour.GammaCorrector=None, contrast_mask=None):
-        super().__init__()
-        
-        self.m_Debug = False
-
-        self._gamma_corrector = gamma_corrector
-
-        self._contrast_mask = contrast_mask
-
-        self._calib_board = calib_board
-
-        self.m_GatheringImages = False
-        self.m_CaptureCallbacks = []
-
-    def AddCaptureCallback(self, func):
-        self.m_CaptureCallbacks.append(func)
-
-    def RemoveCaptureCallback(self, func):
-        self.m_CaptureCallbacks.remove(func)
-
-    @property
-    def debug(self):
-        return self.m_Debug
-
-    @debug.setter
-    def debug(self, value):
-        self.m_Debug = value
-
-    # Private Functions
-    def __RunAfterCaptureCallbacks(self, img, numImages):
-        for func in self.m_CaptureCallbacks:
-            func(img, numImages)
+# Characterisation
 
 class ZhangJointChar(utils.SerialisableMixin):
     def __init__(self, rotation, translation, reproj_err):
@@ -412,13 +376,13 @@ class ZhangChar(utils.SerialisableMixin):
         xp = utils.ProcessingContext().xp
         return xp.dot(xp.asarray(self.intrinsic_mat), self.extrinsic_mat)
 
-    def execute(self, board: CalibrationBoard, poiCoords, resolution, extraFlags=None):
+    def execute(self, board: CharacterisationBoard, poiCoords, resolution, extraFlags=None):
         w, h = resolution
 
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
 
-            boardCoords = utils.ToContext(xp, board.GetPOICoords())
+            boardCoords = utils.ToContext(xp, board.get_poi_coords())
             objectCoords = xp.repeat(boardCoords[xp.newaxis, ...], len(poiCoords), axis=0)
 
             poiCoords = utils.ToContext(xp, poiCoords)
@@ -497,14 +461,14 @@ class ZhangChar(utils.SerialisableMixin):
 
         return xp.asarray(pois).reshape(-1, 2)
 
-    def joint_char(self, other: ZhangChar, board: CalibrationBoard) -> ZhangJointChar:
+    def joint_char(self, other: ZhangChar, board: CharacterisationBoard) -> ZhangJointChar:
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
             
             flags = cv2.CALIB_USE_INTRINSIC_GUESS
             criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-5)
 
-            boardCoords = board.GetPOICoords()
+            boardCoords = board.get_poi_coords()
             obj_coords = xp.repeat(boardCoords[xp.newaxis, ...], len(self._pose_poi_coords), axis=0)
 
             reproj_rms, self._intrinsic_mat, self._distort_mat, other._intrinsic_mat, other._distort_mat, R, T, E, F = \

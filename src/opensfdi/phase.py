@@ -1,5 +1,3 @@
-import numpy as np
-
 from abc import ABC, abstractmethod
 from skimage.restoration import unwrap_phase
 
@@ -9,12 +7,12 @@ from . import image, utils
 
 class Shifter(ABC):
     @abstractmethod
-    def __init__(self, phaseCounts):
-        self.m_PhaseCounts = phaseCounts
-    
+    def __init__(self, phase_counts):
+        self._phase_counts = phase_counts
+
     @property
     def phase_counts(self):
-        return self.m_PhaseCounts
+        return self._phase_counts
 
     @abstractmethod
     def shift(self, imgs):
@@ -26,11 +24,11 @@ class Shifter(ABC):
     def __next__(self):
         return self.phase_counts.__next__()
 
-class NStepPhaseShift(Shifter):
-    def __init__(self, phaseCounts):
-        super().__init__(phaseCounts=phaseCounts)
+class NStepShifter(Shifter):
+    def __init__(self, phase_counts):
+        super().__init__(phase_counts=phase_counts)
 
-        if (v := len(phaseCounts)) < 3:
+        if (v := len(phase_counts)) < 3:
             raise Exception(f"The N-step method requires 3 or more phases ({v} passed)")
 
     def shift(self, imgs):
@@ -59,6 +57,7 @@ class NStepPhaseShift(Shifter):
 
         return result, ac_img, dc_img
 
+
 # Phase Unwrapping
 
 class Unwrapper(ABC):
@@ -82,18 +81,18 @@ class Unwrapper(ABC):
     def Unwrap(self, phasemap, **kwargs):
         raise NotImplementedError
 
-class ReliabilityPhaseUnwrap(Unwrapper):
-    def __init__(self, stripe_count, wrapAround=False):
-        super().__init__(stripe_count)
+class ReliabilityUnwrapper(Unwrapper):
+    def __init__(self, stripe_count, wrap_around=False):
+        super().__init__([stripe_count])
 
-        self.m_WrapAround = wrapAround
+        self._wrap_around = wrap_around
 
     def Unwrap(self, phasemap):
-        return unwrap_phase(phasemap, wrap_around=self.m_WrapAround)
+        return unwrap_phase(phasemap, wrap_around=self._wrap_around)
 
-class MultiFreqPhaseUnwrap(Unwrapper):
-    def __init__(self, stripe_count):
-        super().__init__(stripe_count)
+class MultiFrequencyUnwrapper(Unwrapper):
+    def __init__(self, stripe_counts):
+        super().__init__(stripe_counts)
 
     def Unwrap(self, phasemaps):
         xp = utils.ProcessingContext().xp

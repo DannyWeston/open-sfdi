@@ -80,10 +80,10 @@ def test_calibration():
         )
 
         # Phase shifters / unwrappers
-        shifter_x = phase.NStepPhaseShift([12, 12, 12])
-        shifter_y = phase.NStepPhaseShift([12, 12, 12])
-        unwrapper_x = phase.MultiFreqPhaseUnwrap([1.0, 8.0, 64.0])
-        unwrapper_y = phase.MultiFreqPhaseUnwrap([1.0, 8.0, 64.0])
+        shifter_x = phase.NStepShifter([12, 12, 12])
+        shifter_y = phase.NStepShifter([12, 12, 12])
+        unwrapper_x = phase.MultiFrequencyUnwrapper([1.0, 8.0, 64.0])
+        unwrapper_y = phase.MultiFrequencyUnwrapper([1.0, 8.0, 64.0])
 
         for (w, h) in resolutions:
             print(f"Completing {w}x{h}")
@@ -218,8 +218,8 @@ def test_measurement():
     with utils.ProcessingContext.UseGPU(True):
         xp = utils.ProcessingContext().xp
 
-        shifter = phase.NStepPhaseShift([12, 12, 12])
-        unwrapper = phase.MultiFreqPhaseUnwrap([1.0, 8.0, 64.0])
+        shifter = phase.NStepShifter([12, 12, 12])
+        unwrapper = phase.MultiFrequencyUnwrapper([1.0, 8.0, 64.0])
 
         dc_mask = (1.0/3.0, 1.0)
         ac_mask = (0.2, 1.0)
