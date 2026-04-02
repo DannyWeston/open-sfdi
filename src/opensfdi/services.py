@@ -1,6 +1,6 @@
 import cv2
 import re
-import json
+import json_numpy
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -74,7 +74,7 @@ class JSONRepository(IRepository[T]):
 
         # Save metadata
         with open(self._storage_dir / f"{id}.json", "w") as jsonFile:
-            json.dump(serialisable.to_dict(), jsonFile, indent=2)
+            json_numpy.dump(serialisable.to_dict(), jsonFile, indent=2)
 
     def Delete(self, id: str) -> bool:
         # TODO: Implement
@@ -86,7 +86,7 @@ class JSONRepository(IRepository[T]):
 
     def __LoadConfig(self, name):
         with open(self._storage_dir / f"{name}.json", "r") as jsonFile:
-            rawJson = json.load(jsonFile)
+            rawJson = json_numpy.load(jsonFile)
 
         return utils.SerialisableMixin.from_dict(rawJson)
 

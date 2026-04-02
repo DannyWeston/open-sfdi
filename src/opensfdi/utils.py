@@ -58,10 +58,8 @@ class SerialisableMixin:
     def __init_subclass__(cls):
         cls._type_registry[cls.__name__] = cls
         
-        # Merge parent's exclude fields with child's
-        parent_excludes = getattr(super(cls, cls), '_exclude_fields', set())
-        child_excludes = getattr(cls, '_exclude_fields', set())
-        cls._exclude_fields = parent_excludes | child_excludes
+        # Exclude fields
+        cls._exclude_fields = getattr(cls, '_exclude_fields', set())
         
         super().__init_subclass__()
     
@@ -87,8 +85,8 @@ class SerialisableMixin:
                 
                 data[key] = d
 
-            elif isinstance(value, np.ndarray):
-                data[key] = value.tolist()
+            # elif isinstance(value, np.ndarray):
+            #     data[key] = value.tolist()
 
             else:
                 data[key] = value
@@ -106,8 +104,11 @@ class SerialisableMixin:
         vars = dict()
 
         for key, value in data.items():
+            if isinstance(value, np.ndarray):
+                if not value.flags.writeable:
+                    value = value.copy()
+
             if isinstance(value, dict) and "__type__" in value:
-                # Found another SerialisableMixin, need to initialise correctly
                 value = SerialisableMixin.from_dict(value)
 
             vars[key] = value

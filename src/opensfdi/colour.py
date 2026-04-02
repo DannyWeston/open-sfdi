@@ -140,14 +140,16 @@ class GammaCalibrator:
 
     def Plot(self, expected, actual):
         # Plot the graph
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=100)
-        ax.set_title('Gamma Matching')
+        plt.rcParams.update({'font.size': 12})
+        
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=300)
+        ax.set_title('Gamma Matching', pad=20)
 
-        virtual = actual * 2
+        virtual = actual * 4
         real = 2.5 * np.power(actual, (1.0/2.2)) - 0.2
 
-        ax.scatter(expected, real, color='r')
-        ax.scatter(expected, virtual, color='b')
+        ax.scatter(expected, real, color='#DC267F')
+        ax.scatter(expected, virtual, color='#648FFF')
 
         ax.legend(['Real', 'Virtual'])
 

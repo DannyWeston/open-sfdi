@@ -2,21 +2,14 @@ import pytest
 import cv2
 
 from pathlib import Path
-
-from opensfdi import characterisation, stereo as calib, utils, services, cloud, colour, reconstruction as recon
+from opensfdi import characterisation, utils, services, cloud, colour
 from opensfdi.devices import FileCamera
-from opensfdi.image import show_img
-from opensfdi.phase import unwrap, shift
+
+from opensfdi import phase, image
 
 from .stub import StubProjector
 
 exp_root = Path("D:\\results\\realdata3")
-
-objects = [
-    "Pillars",
-    "Recess",
-    "SteppedPyramid"
-]
 
 # @pytest.mark.skip(reason="Not ready")
 def test_gamma():
@@ -46,9 +39,6 @@ def test_gamma():
 
         gamma_calibrator = gamma_calibrator.Calculate(intensities, measurements)
         corrected = gamma_calibrator.apply(measurements)
-
-        # print(f"Before: {np.abs(intensities - measurements).max() * 100 :.2f}%")
-        # print(f"After: {np.abs(intensities - corrected).max() * 100 :.2f}%")
 
         assert xp.allclose(intensities, corrected, rtol=0.0, atol=0.005) # 0.5% tolerance
 

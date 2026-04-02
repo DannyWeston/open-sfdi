@@ -4,42 +4,38 @@ import numpy as np
 import cv2
 
 from abc import ABC, abstractmethod
-from . import image, utils, colour
+from . import image, utils
 
-def show_pois(img, poi_count, poi_coords, size=None, colour_by=None):
-    winName = f"Detected POIs"
-
+def draw_pois(img, poi_count, poi_coords, colour_by=None):
     with utils.ProcessingContext.UseGPU(False):
         xp = utils.ProcessingContext().xp
 
         img = utils.ToContext(xp, img)
-        if len(img.shape) == 2: 
+        if len(img.shape) == 2:
             img = image.ExpandN(img, 3)
 
         poi_coords = utils.ToContext(xp, poi_coords)
-        
-        if colour_by is not None:
-            colour_by = utils.ToContext(xp, colour_by)
-            colour_by = image.Normalise(colour_by)
 
-            # Sort by individual reprojection errors
-            poi_coords = poi_coords[np.argsort(colour_by)]
-            poi_coords = poi_coords.astype(np.uint16)
+        # draw_img = image.ToInt(img)
+        draw_img = image.ToInt(img.copy())
 
-            for i in range(len(poi_coords)):
-                # colour = (0.0, 1.0, 0.0) if reprojErrs[i] < 0 else (0.0, 0.0, 1.0)
-                colour = (0.0, 1.0 - colour_by[i], float(colour_by[i]))
-                img = cv2.circle(img, poi_coords[i], 3, colour, -1)
-        
-        else:
-            # for i, (x, y) in enumerate(poiCoords):
-            #     img = cv2.circle(img, (int(x), int(y)), 5, (0, 255, 0), -1, cv2.FILLED)
+        # No colours to draw... easy task
+        if colour_by is None:
+            return image.ToFloat(cv2.drawChessboardCorners(draw_img, poi_count, poi_coords, True))
+    
+        colour_by = utils.ToContext(xp, colour_by)
+        colour_by = image.Normalise(colour_by)
 
-            img = image.ToInt(img)
-            img = cv2.drawChessboardCorners(img.copy(), poi_count, poi_coords, True)
+        # Sort by individual reprojection errors
+        poi_coords = poi_coords[np.argsort(colour_by)]
+        poi_coords = poi_coords.astype(np.uint16)
 
-        image.show_img(img, winName, size=size)
+        for i in range(len(poi_coords)):
+            # colour = (0.0, 1.0, 0.0) if reprojErrs[i] < 0 else (0.0, 0.0, 1.0)
+            colour = (0.0, 1.0 - colour_by[i], float(colour_by[i]))
+            draw_img = cv2.circle(draw_img, poi_coords[i], 3, colour, -1)
 
+        return image.ToFloat(draw_img)
 
 # Characterisation Boards
 
@@ -96,13 +92,12 @@ class Checkerboard(CharacterisationBoard):
 
             img = utils.ToContext(xp, img)
 
-            flags = cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_EXHAUSTIVE 
-            result, corners = cv2.findChessboardCorners(img, self.poi_count, flags=flags)
+            result, corners = cv2.findChessboardCorners(img, self.poi_count)
 
             if not result: return None
 
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.01)
-            corners = cv2.cornerSubPix(img, corners, (5, 5), (-1, -1), criteria)
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
+            corners = cv2.cornerSubPix(img, corners, (11, 11), (-1, -1), criteria)
 
         return corners.squeeze()
 
@@ -114,8 +109,8 @@ class Checkerboard(CharacterisationBoard):
         if dtype is None: dtype = xp.float32
 
         ys, xs = xp.mgrid[:h, :w].astype(dtype)
-        xs *= self._square_size[0]
-        ys *= self._square_size[1]
+        xs *= self.square_size[0]
+        ys *= self.square_size[1]
         zs = xp.zeros(w * h, dtype=dtype)
 
         return xp.vstack([xs.ravel(), ys.ravel(), zs]).T
@@ -376,16 +371,17 @@ class ZhangChar(utils.SerialisableMixin):
         xp = utils.ProcessingContext().xp
         return xp.dot(xp.asarray(self.intrinsic_mat), self.extrinsic_mat)
 
-    def execute(self, board: CharacterisationBoard, poiCoords, resolution, extraFlags=None):
+    def execute(self, board: CharacterisationBoard, poi_coords, resolution, extraFlags=None):
         w, h = resolution
 
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
 
-            boardCoords = utils.ToContext(xp, board.get_poi_coords())
-            objectCoords = xp.repeat(boardCoords[xp.newaxis, ...], len(poiCoords), axis=0)
+            board_coords = utils.ToContext(xp, board.get_poi_coords())
 
-            poiCoords = utils.ToContext(xp, poiCoords)
+            objectCoords = xp.repeat(board_coords[xp.newaxis, ...], len(poi_coords), axis=0)
+
+            poi_coords = utils.ToContext(xp, poi_coords)
 
             flags = 0
 
@@ -408,20 +404,22 @@ class ZhangChar(utils.SerialisableMixin):
             else: kGuess = None
 
             _, self._intrinsic_mat, self._distort_mat, self._pose_rotations, self._pose_translations = cv2.calibrateCamera(
-                objectCoords, poiCoords, (w, h), kGuess, utils.ToContext(xp, self.distort_mat), flags=flags
+                objectCoords, poi_coords, (w, h), kGuess, utils.ToContext(xp, self.distort_mat), flags=flags
             )
 
             self._pose_rotations = xp.asarray(self._pose_rotations)
             self._pose_translations = xp.asarray(self._pose_translations)
 
-            self._reproj_errs = self.calc_reproj_errs(objectCoords, poiCoords,
+            self._reproj_errs = self.calc_reproj_errs(objectCoords, poi_coords,
                 self.intrinsic_mat, self.distort_mat, self._pose_rotations, self._pose_translations)
+            
+            self._reproj_errs = self._reproj_errs.flatten()
 
             self._rotation = cv2.Rodrigues(self._pose_rotations[0])[0]
             self._translation = self._pose_translations[0].squeeze()
 
             self._resolution = resolution
-            self._pose_poi_coords = poiCoords
+            self._pose_poi_coords = poi_coords
 
             M0 = utils.TransMat(self.rotation, self.translation)
 
@@ -465,11 +463,11 @@ class ZhangChar(utils.SerialisableMixin):
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
             
-            flags = cv2.CALIB_USE_INTRINSIC_GUESS
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-5)
+            flags = cv2.CALIB_FIX_INTRINSIC
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
 
-            boardCoords = board.get_poi_coords()
-            obj_coords = xp.repeat(boardCoords[xp.newaxis, ...], len(self._pose_poi_coords), axis=0)
+            board_coords = board.get_poi_coords()
+            obj_coords = xp.repeat(board_coords[xp.newaxis, ...], len(self.pose_poi_coords), axis=0)
 
             reproj_rms, self._intrinsic_mat, self._distort_mat, other._intrinsic_mat, other._distort_mat, R, T, E, F = \
                 cv2.stereoCalibrate(obj_coords, self.pose_poi_coords, other.pose_poi_coords,
@@ -478,15 +476,15 @@ class ZhangChar(utils.SerialisableMixin):
             )
             
             # Other reproj error (need to use R and T)
-            for i in range(len(other._pose_rotations)):
-                _, R2, T2 = cv2.solvePnP(
-                    obj_coords[i], self.pose_poi_coords[i], self.intrinsic_mat, self.distort_mat,
-                    flags=cv2.SOLVEPNP_ITERATIVE
-                )
+            # for i in range(len(other._pose_rotations)):
+            #     _, R2, T2 = cv2.solvePnP(
+            #         obj_coords[i], self.pose_poi_coords[i], self.intrinsic_mat, self.distort_mat,
+            #         flags=cv2.SOLVEPNP_ITERATIVE
+            #     )
                 
-                R2 = cv2.Rodrigues(R2)[0]
-                other._pose_rotations[i] = cv2.Rodrigues(R @ R2)[0]
-                other._pose_translations[i] = R @ T2 + T.reshape(3, 1)
+            #     R2 = cv2.Rodrigues(R2)[0]
+            #     other._pose_rotations[i] = cv2.Rodrigues(R @ R2)[0]
+            #     other._pose_translations[i] = R @ T2 + T.reshape(3, 1)
 
             return ZhangJointChar(R, T, reproj_rms)
 
@@ -509,7 +507,7 @@ class ZhangChar(utils.SerialisableMixin):
         v = f'<Char>'
 
         if self.reproj_errs is not None:
-            reproj_rms = xp.sqrt(xp.mean((self._reproj_errs ** 2).flatten()))
+            reproj_rms = xp.sqrt(xp.mean(xp.power(self._reproj_errs, 2)))
             v += f' Reprojection Error: {reproj_rms:.4f}'
 
         return v

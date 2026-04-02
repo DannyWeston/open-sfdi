@@ -1,5 +1,6 @@
 import cv2
 import threading
+from importlib import util
 
 from abc import abstractmethod
 
@@ -8,78 +9,20 @@ from . import utils, image, characterisation as ch
 # Cameras
 
 class BaseCamera(utils.SerialisableMixin, ch.ICharable):
-    def __init__(self, char:ch.ZhangChar=None):
+    def __init__(self, resolution: tuple[int, int], channels: int, refresh_rate: float, char:ch.ZhangChar=None):
         self._char = char
+
+        self._resolution = resolution
+        self._channels = channels
+        self._refresh_rate = refresh_rate
 
     @property
     def char(self):
         return self._char
-
-    @property
-    @abstractmethod
-    def channels(self) -> int:
-        raise NotImplementedError
-
-    @property
-    @abstractmethod
-    def resolution(self) -> tuple[int, int]:
-        raise NotImplementedError
-
-    @property
-    @abstractmethod
-    def refresh_rate(self) -> float:
-        raise NotImplementedError
-
-    @property
-    @abstractmethod
-    def shape(self):
-        raise NotImplementedError
-
-    @abstractmethod
-    def capture(self) -> image.Image:
-        """ Capture an image NOTE: should return Image object"""
-        raise NotImplementedError
-
-    def __str__(self):
-        v = "<Camera>"
-
-        if self.char:
-            v += f" {self.char}"
-
-        else: v+= " (Not Characterised)"
-
-        return v
-
-class CV2Camera(BaseCamera):
-    _exclude_fields = {'_camera_handle'}
-
-    def __init__(self, device_id: int, resolution: tuple[int, int], channels: int, refresh_rate: float, 
-        char:ch.ZhangChar=None
-    ):
-        super().__init__(char=char)
-
-        # Capture an image
-        self._camera_handle = cv2.VideoCapture(device_id)
-
-        self._channels = channels
-        self._refresh_rate = refresh_rate
-
-        # Resolution
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
-        self._camera_handle.set(cv2.CAP_PROP_FPS, refresh_rate)
-
-    @property
-    def resolution(self) -> tuple[int, int]:
-        return (
-            int(self._camera_handle.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            int(self._camera_handle.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        )
     
-    @resolution.setter
-    def resolution(self, value: tuple[int, int]):
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, value[0])
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, value[1])
+    @char.setter
+    def char(self, value):
+        self._char = value
 
     @property
     def channels(self) -> int:
@@ -90,12 +33,12 @@ class CV2Camera(BaseCamera):
         self._channels = value
 
     @property
-    def refresh_rate(self) -> float:
-        return self._camera_handle.get(cv2.CAP_PROP_FPS)
+    def resolution(self) -> tuple[int, int]:
+        return self._resolution
 
-    @refresh_rate.setter
-    def refresh_rate(self, value: float):
-        self._camera_handle.set(cv2.CAP_PROP_FPS, value)
+    @property
+    def refresh_rate(self) -> float:
+        return self._refresh_rate
 
     @property
     def shape(self):
@@ -104,6 +47,69 @@ class CV2Camera(BaseCamera):
         if self.channels == 1: return (h, w)
         
         return (h, w, self.channels)
+
+    @abstractmethod
+    def capture(self) -> image.Image:
+        """ Capture an image NOTE: should return Image object"""
+        raise NotImplementedError
+
+    # Optional
+    def cleanup(self):
+        pass
+
+    def __str__(self):
+        v = "<Camera>"
+        v += f" {self.char}" if self.char else " (Not Characterised)"
+        return v
+
+class CV2Camera(BaseCamera):
+    _exclude_fields = {'_camera_handle'}
+
+    def __init__(self, resolution: tuple[int, int], channels: int, refresh_rate: float, device_id:int = 0, char:ch.ZhangChar=None):
+        super().__init__(resolution, channels, refresh_rate, char=char)
+
+        self._device_id = device_id
+        self._camera_handle = cv2.VideoCapture(device_id, apiPreference=cv2.CAP_DSHOW)
+        self._set_cv_props()
+        
+    def _set_cv_props(self):
+        self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+        self._camera_handle.set(cv2.CAP_PROP_FPS, self.refresh_rate)
+
+    @property
+    def device_id(self):
+        return self._device_id
+
+    @device_id.setter
+    def device_id(self, value:int):
+        self._device_id = value
+
+        self._camera_handle = cv2.VideoCapture(value, apiPreference=cv2.CAP_DSHOW)
+        self._set_cv_props()
+
+    @property
+    def resolution(self):
+        return super().resolution
+
+    @resolution.setter
+    def resolution(self, value: tuple[int, int]):
+        self._resolution = value
+
+        if self._camera_handle:
+            self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, value[0])
+            self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, value[1])
+
+    @property
+    def refresh_rate(self):
+        return super().refresh_rate
+
+    @refresh_rate.setter
+    def refresh_rate(self, value: float):
+        self._refresh_rate = value
+
+        self._camera_handle.set(cv2.CAP_PROP_FPS, value)
 
     def capture(self) -> image.Image:
         ret, raw_data = self._camera_handle.read()
@@ -118,16 +124,11 @@ class CV2Camera(BaseCamera):
         # Undistort if can
         # rawImg = self.characterisation.Undistort(rawImg)
 
-        # Convert to grey if needed
-        if (self.channels == 1) and (1 < len(raw_data.shape)):
-            raw_data = cv2.cvtColor(raw_data, cv2.COLOR_BGR2GRAY)
-
         return image.Image(raw_data)
-
-    def __del__(self):
-        if self._camera_handle:
-            if self._camera_handle.isOpened():
-                self._camera_handle.release()
+    
+    def cleanup(self):
+        if self._camera_handle.isOpened():
+            self._camera_handle.release()
 
 class FileCamera(BaseCamera):
     _exclude_fields = {
@@ -138,12 +139,9 @@ class FileCamera(BaseCamera):
     def __init__(self, resolution: tuple[int, int], channels: int, refresh_rate: float, images:list[image.FileImage]=None, prefetch=-1, 
         char:ch.ZhangChar=None
     ):
-        super().__init__(char=char)
+        super().__init__(resolution, channels, refresh_rate, char=char)
 
         self._images = images
-        self._resolution = resolution
-        self._refresh_rate = refresh_rate
-        self._channels = channels
 
         self._prefetch = prefetch
         self._preloaded_count = 0
@@ -151,38 +149,6 @@ class FileCamera(BaseCamera):
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._prefetcher_thread = None
-
-    @property
-    def resolution(self) -> tuple[int, int]:
-        return self._resolution
-    
-    @resolution.setter
-    def resolution(self, value: tuple[int, int]):
-        self._resolution = value
-
-    @property
-    def channels(self) -> int:
-        return self._channels
-
-    @channels.setter
-    def channels(self, value):
-        self._channels = value
-
-    @property
-    def refresh_rate(self) -> float:
-        return self._refresh_rate
-
-    @refresh_rate.setter
-    def refresh_rate(self, value: float):
-        self._refresh_rate = value
-
-    @property
-    def shape(self):
-        w, h = self.resolution
-
-        if self.channels == 1: return (h, w)
-        
-        return (h, w, self.channels)
 
     @property
     def images(self) -> list[image.FileImage]:
@@ -242,6 +208,46 @@ class FileCamera(BaseCamera):
             except IndexError:
                 return None
 
+# Raspberry Pi based camera
+
+if util.find_spec("picamera2"):
+    class PiCamera(BaseCamera):
+        _exclude_fields = {'_camera_handle'}
+
+        def __init__(self, resolution:tuple[int, int], channels:int, refresh_rate:float, device_id:int = 0, char:ch.ZhangChar=None):
+            super().__init__(resolution, channels, refresh_rate, char=char)
+
+            # Capture an image
+            self._init = False
+            self._camera_handle = None
+            # self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            
+            self._device_id = device_id
+        
+        @resolution.setter
+        def resolution(self, value: tuple[int, int]):
+            self._resolution = value
+
+            # self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, value[0])
+            # self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, value[1])
+
+        @refresh_rate.setter
+        def refresh_rate(self, value: float):
+            self._refresh_rate = value
+
+            # self._camera_handle.set(cv2.CAP_PROP_FPS, value)
+
+        def capture(self) -> image.Image:
+            raw_data = None
+
+            # Use float (spec of program)!
+            raw_data = image.ToFloat(raw_data)
+
+            return image.Image(raw_data)
+        
+        def cleanup(self):
+            if self._camera_handle:
+                pass
 
 # Projectors
 
@@ -269,7 +275,6 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
     def channels(self) -> int:
         raise NotImplementedError
 
-    
     @property
     @abstractmethod
     def refresh_rate(self) -> float:
@@ -281,9 +286,8 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
         raise NotImplementedError
     
     @property
-    @abstractmethod
-    def aspect_ratio(self) -> float:
-        raise NotImplementedError
+    def aspect_ratio(self):
+        return self.resolution[0] / self.resolution[1]
     
     @property
     def shape(self):
@@ -293,6 +297,11 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
             return (h, w)
         
         return (h, w, self.channels)
+
+    @property
+    @abstractmethod
+    def img(self):
+        raise NotImplementedError
 
     @property
     def debug(self):
@@ -312,10 +321,139 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
         if self.char:
             v += f" {self.char}"
 
-        else: v+= " (Not Characterised)"
+        else: v += " (Not Characterised)"
 
         return v
 
+# class PygameProjector(BaseProjector):
+#     def __init__(self, device_id: int, char:ch.ZhangChar=None, resolution=(1280, 720), refresh_rate=10.0, warmup_time=0.0):
+#         super().__init__(char)
+
+#         self._device_id = device_id
+
+#         self.__on_draw_callbacks = []
+#         self.__on_init_callbacks = []
+
+#         self.finished = False
+#         self._frame_drawn = None
+#         self._display = None
+
+#         self.__warmed_up = False
+        
+#         self.__surface = None
+#         self.__clock = None
+
+#         self.__warmup_time = warmup_time
+
+#         self._resolution = resolution
+#         self._refresh_rate = refresh_rate
+        
+#         self._default_img = np.ones(shape=(*self._resolution, 3), dtype=np.uint8) * 255
+        
+#         pygame.init()
+#         self._display = pygame.display.set_mode(resolution, pygame.SHOWN | pygame.NOFRAME | pygame.FULLSCREEN, display=self._device_id)
+
+#     def display(self, img: np.ndarray):
+#         if img.dtype != np.uint8:
+#             img = (img * 255).astype(np.uint8)
+
+#         rot_img = np.rot90(img, k=3)
+#         self.__surface = pygame.surfarray.make_surface(rot_img)
+
+#         self._frame_drawn = False
+
+#     def _loop(self):
+#         self.finished = False
+#         self.__clock = pygame.time.Clock()
+
+#         self._display = pygame.display.set_mode(self.resolution, pygame.SHOWN | pygame.NOFRAME | pygame.FULLSCREEN, display=self._device_id)
+#         pygame.mouse.set_visible(False)
+#         pygame.display.set_window_position(self.offset)
+
+#         # Check if slpash screen needed for warmup
+#         if (not self.__warmed_up) and (0.0 < self.__warmup_time): 
+#             # Display black image by default
+#             self.display(self._default_img)
+#             self.__draw()
+
+#             wait_start = time.time_ns()
+#             while True:
+#                 if (self.__warmup_time * 1e9) < (time.time_ns() - wait_start): break
+
+#                 self.__clock.tick(self.refresh_rate)
+
+#         self.__warmed_up = True
+
+#         for cb in self.__on_init_callbacks:
+#             cb()
+
+#         while not self.finished:
+#             if self.__draw():
+#                 for cb in self.__on_draw_callbacks:
+#                     cb()
+
+#             self.__clock.tick(self.refresh_rate)
+        
+#         pygame.mouse.set_visible(True)
+#         self._display = pygame.display.set_mode(self.resolution, pygame.HIDDEN | pygame.NOFRAME | pygame.FULLSCREEN, display=self._device_id)
+
+#     def __draw(self):
+#         if not self._frame_drawn:
+#             self._display.blit(self.__surface, (0, 0))
+
+#             pygame.display.update()
+
+#             self._frame_drawn = True
+
+#             return True
+        
+#         return False
+
+#     @property
+#     def resolution(self):
+#         return pygame.display.get_window_size()
+
+#     @resolution.setter
+#     def resolution(self, value):
+#         self._display = pygame.display.set_mode(value, pygame.SHOWN | pygame.NOFRAME, display=self._device_id)
+    
+#     @property
+#     def refresh_rate(self) -> float:
+#         return self._refresh_rate
+
+#     @refresh_rate.setter
+#     def refresh_rate(self, value):
+#         self._refresh_rate = value
+
+#     @property
+#     def offset(self):
+#         return pygame.display.get_window_position()
+
+#     @property
+#     def warmup_time(self):
+#         return self.__warmup_time
+    
+#     @warmup_time.setter
+#     def warmup_time(self, value):
+#         self.__warmup_time = value
+
+#     def add_on_draw_callback(self, cb):
+#         self.__on_draw_callbacks.append(cb)
+
+#     def remove_on_draw_callback(self, cb):
+#         self.__on_draw_callbacks.remove(cb)
+
+#     def add_on_init_callback(self, cb):
+#         self.__on_init_callbacks.append(cb)
+
+#     def remove_on_init_callback(self, cb):
+#         self.__on_init_callbacks.remove(cb)
+
+#     def __str__(self):
+#         w, h = self.resolution
+#         freq = self.refresh_rate
+
+#         return f'DisplayProjector ({w}x{h}, {freq} hz)'
 
 # Utility methods
 
