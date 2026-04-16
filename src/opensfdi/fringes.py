@@ -22,7 +22,7 @@ def phase_to_coord(resolution, cam_coords, phasemap, stripe_count, use_x=True, b
 
     return projCoords
 
-def sinusoidal_pattern(resolution, num_stripes, phase=0.0, rotation=0.0, channels=1):
+def sinusoidal_pattern(resolution, num_stripes, phase=0.0, rotation=0.0):
     ''' 
         resolution: (width, height) in integer pixels\n
         num_stripes: float for total number of oscillations\n
@@ -48,9 +48,7 @@ def sinusoidal_pattern(resolution, num_stripes, phase=0.0, rotation=0.0, channel
     fringes += 0.5
     fringes /= 2.0
 
-    if channels == 1: return fringes
-
-    return xp.dstack([fringes] * channels)
+    return fringes
 
 class StereoFringeProjection:
     def __init__(self):
@@ -78,7 +76,7 @@ class StereoFringeProjection:
                 index += ((phase_count-j) % phase_count) if reverse else j
 
                 # Generate fringes and display them on the projector
-                pattern = image.make_fringe_pattern(projector.resolution, stripe_count, phase, rotation, projector.channels)
+                pattern = image.make_fringe_pattern(projector.resolution, stripe_count, phase, rotation)
                 projector.display(pattern)
 
                 # Capture an image using the camera, and ensure to load it to correct context

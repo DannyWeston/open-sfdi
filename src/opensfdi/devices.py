@@ -9,11 +9,10 @@ from . import utils, image, characterisation as ch
 # Cameras
 
 class BaseCamera(utils.SerialisableMixin, ch.ICharable):
-    def __init__(self, resolution: tuple[int, int], channels: int, refresh_rate: float, char:ch.ZhangChar=None):
+    def __init__(self, resolution: tuple[int, int], refresh_rate: float, char:ch.ZhangChar=None):
         self._char = char
 
         self._resolution = resolution
-        self._channels = channels
         self._refresh_rate = refresh_rate
 
     @property
@@ -25,28 +24,12 @@ class BaseCamera(utils.SerialisableMixin, ch.ICharable):
         self._char = value
 
     @property
-    def channels(self) -> int:
-        return self._channels
-
-    @channels.setter
-    def channels(self, value):
-        self._channels = value
-
-    @property
     def resolution(self) -> tuple[int, int]:
         return self._resolution
 
     @property
     def refresh_rate(self) -> float:
         return self._refresh_rate
-
-    @property
-    def shape(self):
-        w, h = self.resolution
-
-        if self.channels == 1: return (h, w)
-        
-        return (h, w, self.channels)
 
     @abstractmethod
     def capture(self) -> image.Image:
@@ -62,21 +45,21 @@ class BaseCamera(utils.SerialisableMixin, ch.ICharable):
         v += f" {self.char}" if self.char else " (Not Characterised)"
         return v
 
-class CV2Camera(BaseCamera):
+class OpenCVCamera(BaseCamera):
     _exclude_fields = {'_camera_handle'}
 
-    def __init__(self, resolution: tuple[int, int], channels: int, refresh_rate: float, device_id:int = 0, char:ch.ZhangChar=None):
-        super().__init__(resolution, channels, refresh_rate, char=char)
+    def __init__(self, resolution: tuple[int, int], refresh_rate: float, device_id:int = 0, char:ch.ZhangChar=None):
+        super().__init__(resolution, refresh_rate, char=char)
 
         self._device_id = device_id
         self._camera_handle = cv2.VideoCapture(device_id, apiPreference=cv2.CAP_DSHOW)
         self._set_cv_props()
-        
+
     def _set_cv_props(self):
         self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
-        self._camera_handle.set(cv2.CAP_PROP_FPS, self.refresh_rate)
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, float(self.resolution[0]))
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self.resolution[1]))
+        self._camera_handle.set(cv2.CAP_PROP_FPS, float(self.refresh_rate))
 
     @property
     def device_id(self):
@@ -136,10 +119,10 @@ class FileCamera(BaseCamera):
         '_prefetch', '_preloaded_count', '_stop_event', '_prefetcher_thread', '_lock', '_xp'
     }
 
-    def __init__(self, resolution: tuple[int, int], channels: int, refresh_rate: float, images:list[image.FileImage]=None, prefetch=-1, 
+    def __init__(self, resolution: tuple[int, int], refresh_rate: float, images:list[image.FileImage]=None, prefetch=-1, 
         char:ch.ZhangChar=None
     ):
-        super().__init__(resolution, channels, refresh_rate, char=char)
+        super().__init__(resolution, refresh_rate, char=char)
 
         self._images = images
 
@@ -214,8 +197,8 @@ if util.find_spec("picamera2"):
     class PiCamera(BaseCamera):
         _exclude_fields = {'_camera_handle'}
 
-        def __init__(self, resolution:tuple[int, int], channels:int, refresh_rate:float, device_id:int = 0, char:ch.ZhangChar=None):
-            super().__init__(resolution, channels, refresh_rate, char=char)
+        def __init__(self, resolution:tuple[int, int], refresh_rate:float, device_id:int = 0, char:ch.ZhangChar=None):
+            super().__init__(resolution, refresh_rate, char=char)
 
             # Capture an image
             self._init = False
@@ -269,11 +252,6 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
     @abstractmethod
     def resolution(self) -> tuple[int, int]:
         raise NotImplementedError
-    
-    @property
-    @abstractmethod
-    def channels(self) -> int:
-        raise NotImplementedError
 
     @property
     @abstractmethod
@@ -288,15 +266,6 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
     @property
     def aspect_ratio(self):
         return self.resolution[0] / self.resolution[1]
-    
-    @property
-    def shape(self):
-        w, h = self.resolution
-
-        if self.channels == 1:
-            return (h, w)
-        
-        return (h, w, self.channels)
 
     @property
     @abstractmethod
@@ -460,17 +429,17 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
 def gather_gamma_imgs(camera: BaseCamera, projector: BaseProjector, intensities):
     xp = utils.ProcessingContext().xp
 
-    captured_imgs = xp.empty((len(intensities), *camera.shape), dtype=xp.float32)
+    captured_imgs = []
 
-    for i, v in enumerate(intensities):
-        project_img = xp.ones(projector.shape, dtype=xp.float32) * v
+    for intensity in intensities:
+        project_img = xp.ones(projector.shape, dtype=xp.float32) * intensity
 
         # TODO: Callbacks
         projector.display(project_img)
 
-        captured_imgs[i] = camera.capture().raw_data
+        captured_imgs.append(camera.capture().raw_data)
 
-    return captured_imgs
+    return xp.asarray(captured_imgs)
 
     # Find first observable change of values for averages (left and right sides) i.e >= delta
     # s, f = DetectableIndices(averages, delta)

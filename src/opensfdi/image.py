@@ -163,7 +163,7 @@ def Normalise(data):
 
 # Fringe Projection
 
-def make_fringe_pattern(resolution, num_stripes, phase=0.0, rotation=0.0, channels=1, dst=None):
+def make_fringe_pattern(resolution, num_stripes, phase=0.0, rotation=0.0, dst=None):
     ''' 
         resolution: (width, height) in integer pixels\n
         num_stripes: float for total number of oscillations\n
@@ -190,9 +190,7 @@ def make_fringe_pattern(resolution, num_stripes, phase=0.0, rotation=0.0, channe
     fringes += 0.5
     fringes /= 2.0
 
-    if channels == 1: return fringes
-
-    return xp.dstack([fringes] * channels)
+    return fringes
 
 def ac_component(imgs):
     (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)

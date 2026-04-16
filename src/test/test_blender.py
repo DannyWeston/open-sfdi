@@ -21,7 +21,7 @@ def test_gamma():
             test_root = exp_root / f"{w}x{h}"
 
             # Camera
-            # camera = FileCamera(resolution=(400, 400), channels=1, refresh_rate=30.0)
+            # camera = FileCamera(resolution=(400, 400), refresh_rate=30.0)
             img_repo = services.FileImageRepo(test_root, use_ext='tif')
 
             # Calirbate Gamma
