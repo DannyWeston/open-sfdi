@@ -1,10 +1,12 @@
-[tool.poetry]
+[project]
 name = "opensfdi"
 version = "0.1.14"
 description = ""
-requires-python = "3.13.1"
-authors = ["Daniel Weston <psydw2@nottingham.ac.uk>"]
+authors = [
+    {name = "Daniel Weston", email = "danielweston37@gmail.com"}
+]
 readme = "README.md"
+requires-python = "3.13.1"
 
 [tool.poetry.dependencies]
 opencv-python = "^4.13.0.92"
@@ -13,6 +15,7 @@ scipy = "^1.17.1"
 pillow = "^12.2.0"
 vedo = "^2026.6.1"
 scikit-image = "^0.26.0"
+json-numpy = "^2.1.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

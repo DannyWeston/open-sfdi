@@ -22,33 +22,35 @@ def phase_to_coord(resolution, cam_coords, phasemap, stripe_count, use_x=True, b
 
     return projCoords
 
-def sinusoidal_pattern(resolution, num_stripes, phase=0.0, rotation=0.0):
-    ''' 
+def sinusoidal_pattern(resolution, num_stripes, phase=0.0, rotation=0.0) -> image.Image:
+    '''
         resolution: (width, height) in integer pixels\n
         num_stripes: float for total number of oscillations\n
         phase: float in radians for signal phase shift\n
         rotation: float in radians for orientation of fringes\n
     '''
-    xp = utils.ProcessingContext().xp
 
     w, h = resolution
 
-    ys, xs = xp.meshgrid(
-        xp.linspace(0.0, 1.0, h, endpoint=False, dtype=xp.float32),
-        xp.linspace(0.0, 1.0, w, endpoint=False, dtype=xp.float32),
-        indexing='ij'
+    xs, ys = np.meshgrid(
+        np.linspace(0.0, 1.0, num=w),
+        np.linspace(0.0, 1.0, num=h)
     )
 
-    pixels = (xs * xp.cos(rotation)) - (ys * xp.sin(rotation))
+    pixels =  (np.cos(rotation) * xs) - (np.sin(rotation) * ys)
 
     # I(x, y) = cos(2 * pi * f * x - phi)
-    fringes = xp.cos(num_stripes * 2.0 * xp.pi * pixels - phase, dtype=xp.float32)
+    fringes = np.sin((pixels * 2.0 * np.pi * num_stripes) + phase, dtype=np.float32)
 
     # Normalise fringes from [-1..1] to [0..1]
-    fringes += 0.5
-    fringes /= 2.0
+    return image.Image(data=(fringes + 1.0) / 2.0)
 
-    return fringes
+def bgr_sinusoidal_pattern(resolution, num_stripes, phases, rotations, channels=(1.0, 1.0, 1.0)):
+    r = channels[2] * sinusoidal_pattern(resolution, num_stripes[2], phases[2], rotations[2]).raw_data
+    g = channels[1] * sinusoidal_pattern(resolution, num_stripes[1], phases[1], rotations[1]).raw_data
+    b = channels[0] * sinusoidal_pattern(resolution, num_stripes[0], phases[0], rotations[0]).raw_data
+
+    return image.Image(data=np.dstack([r, g, b]))
 
 class StereoFringeProjection:
     def __init__(self):

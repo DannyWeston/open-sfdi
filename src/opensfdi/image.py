@@ -51,6 +51,14 @@ class FileImage(Image):
 
 # Utility methods
 
+def RGB(w:int, h:int, r: float, g: float, b: float):
+    raw_data = np.ones(shape=(h, w, 3), dtype=np.float32)
+    raw_data[..., 0] *= b
+    raw_data[..., 1] *= g
+    raw_data[..., 2] *= r
+
+    return Image(raw_data)
+
 def ToFloat(rawData):
     xp = utils.ProcessingContext().xp
 

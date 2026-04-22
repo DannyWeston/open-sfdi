@@ -1,6 +1,7 @@
 import cv2
 import re
 import json_numpy
+import os
 
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -94,18 +95,17 @@ class JSONRepository(IRepository[T]):
 
 class FileImageRepo(IRepository[Image]):
     SUPPORTED_FILE_TYPES = [
-        "tif",
-        "bmp"
+        ".tif",
+        ".tiff",
+        ".bmp",
+        ".jpg",
+        ".jpeg",
+        ".png"
     ]
 
-    def __init__(self, storageDir: Path, use_ext='tif', overwrite=True):
+    def __init__(self, storageDir: Path, overwrite=True):
         self.m_Overwrite = overwrite
-
-        if use_ext not in self.SUPPORTED_FILE_TYPES:
-            raise Exception(f"Using a file type of '{use_ext}' is not supported")
-
         self.m_StorageDir = storageDir
-        self.m_FileExt = use_ext
 
     def __LoadImage(self, filename):
         return FileImage(self.m_StorageDir / f"{filename}.{self.m_FileExt}")
@@ -113,15 +113,20 @@ class FileImageRepo(IRepository[Image]):
     def Add(self, img: Image, id: str):
         ''' Save an image to a repository '''
 
+        _, ext = os.path.splitext(id)
+
+        if ext not in self.SUPPORTED_FILE_TYPES:
+            raise Exception(f"Using a file type of '{ext}' is not supported")
+
         found = self.Find(id)
 
         if 0 < len(found) and (not self.m_Overwrite):
             raise FileExistsError(f"Image with id {found[0]} already exists")
 
-        path = self.m_StorageDir / f"{id}.{self.m_FileExt}"
+        path = self.m_StorageDir / id
 
         # Save as float to disk
-        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToInt(img), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToInt(img.raw_data), cv2.COLOR_RGB2BGR))
 
     def Get(self, id: str) -> FileImage:
         found = self.Find(id)
@@ -135,7 +140,7 @@ class FileImageRepo(IRepository[Image]):
         yield from (self.__LoadImage(fn) for fn in self.Find(regex, sorted))
 
     def Find(self, regex: str, sorted=False) -> list[str]:
-        filenames = [file.stem for file in self.m_StorageDir.glob(f"*.{self.m_FileExt}")]
+        filenames = [file.stem for file in self.m_StorageDir.glob(f"*.")]
 
         filenames = list(filter(lambda filename: re.match(regex, filename), filenames))
 
