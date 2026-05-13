@@ -40,7 +40,7 @@ def sinusoidal_pattern(resolution, num_stripes, phase=0.0, rotation=0.0) -> imag
     pixels =  (np.cos(rotation) * xs) - (np.sin(rotation) * ys)
 
     # I(x, y) = cos(2 * pi * f * x - phi)
-    fringes = np.sin((pixels * 2.0 * np.pi * num_stripes) + phase, dtype=np.float32)
+    fringes = np.cos((pixels * 2.0 * np.pi * num_stripes) + phase, dtype=np.float32)
 
     # Normalise fringes from [-1..1] to [0..1]
     return image.Image(data=(fringes + 1.0) / 2.0)
@@ -50,7 +50,7 @@ def bgr_sinusoidal_pattern(resolution, num_stripes, phases, rotations, channels=
     g = channels[1] * sinusoidal_pattern(resolution, num_stripes[1], phases[1], rotations[1]).raw_data
     b = channels[0] * sinusoidal_pattern(resolution, num_stripes[0], phases[0], rotations[0]).raw_data
 
-    return image.Image(data=np.dstack([r, g, b]))
+    return image.Image(data=np.dstack([b, g, r]))
 
 class StereoFringeProjection:
     def __init__(self):

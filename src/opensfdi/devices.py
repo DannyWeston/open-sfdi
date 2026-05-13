@@ -325,6 +325,9 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
     def display(self, img: image.Image):
         raise NotImplementedError
     
+    def cleanup(self):
+        pass
+    
     def __str__(self):
         v = "<Projector>"
 
