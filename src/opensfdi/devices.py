@@ -1,5 +1,7 @@
 import cv2
 import threading
+import sys
+
 from importlib import util
 
 from abc import abstractmethod
@@ -68,8 +70,10 @@ class OpenCVCamera(BaseCamera):
                   exposure:int=0, auto_exposure=False, device_id:int=0, char:ch.ZhangChar=None):
         super().__init__(resolution, refresh_rate, exposure=exposure, auto_exposure=auto_exposure, char=char)
 
+        api = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+
         self._device_id = device_id
-        self._camera_handle = cv2.VideoCapture(device_id, apiPreference=cv2.CAP_DSHOW)
+        self._camera_handle = cv2.VideoCapture(device_id, apiPreference=api)
         self._set_cv_props()
 
     def _set_cv_props(self):
@@ -255,8 +259,18 @@ if util.find_spec("picamera2"):
             # self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             
             self._device_id = device_id
+
+            # Picamera2 Handle
             self._handle = Picamera2()
+
+            self._config = self._handle.create_still_configuration(main={"format": "BGR888"})
+            self._handle.configure(self._config)
             self._handle.start()
+
+            
+        @property
+        def resolution(self) -> tuple[int, int]:
+            return super().resolution
         
         @resolution.setter
         def resolution(self, value: tuple[int, int]):
@@ -264,6 +278,10 @@ if util.find_spec("picamera2"):
 
             # self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, value[0])
             # self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, value[1])
+
+        @property
+        def refresh_rate(self) -> float:
+            return super().refresh_rate
 
         @refresh_rate.setter
         def refresh_rate(self, value: float):
