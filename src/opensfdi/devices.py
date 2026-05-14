@@ -240,11 +240,14 @@ class FileCamera(BaseCamera):
 # Raspberry Pi based camera
 
 if util.find_spec("picamera2"):
+    from picamera2 import Picamera2
+
     class PiCamera(BaseCamera):
         _exclude_fields = {'_camera_handle'}
 
-        def __init__(self, resolution:tuple[int, int], refresh_rate:float, device_id:int = 0, char:ch.ZhangChar=None):
-            super().__init__(resolution, refresh_rate, char=char)
+        def __init__(self, resolution:tuple[int, int], refresh_rate:float, device_id:int = 0, exposure:int=0, auto_exposure=False, 
+                     char:ch.ZhangChar=None):
+            super().__init__(resolution, refresh_rate, exposure=exposure, auto_exposure=auto_exposure, char=char)
 
             # Capture an image
             self._init = False
@@ -252,6 +255,8 @@ if util.find_spec("picamera2"):
             # self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
             
             self._device_id = device_id
+            self._handle = Picamera2()
+            self._handle.start()
         
         @resolution.setter
         def resolution(self, value: tuple[int, int]):
@@ -267,7 +272,7 @@ if util.find_spec("picamera2"):
             # self._camera_handle.set(cv2.CAP_PROP_FPS, value)
 
         def capture(self) -> image.Image:
-            raw_data = None
+            raw_data = self._handle.capture_array()
 
             # Use float (spec of program)!
             raw_data = image.ToFloat(raw_data)
@@ -275,8 +280,8 @@ if util.find_spec("picamera2"):
             return image.Image(raw_data)
         
         def cleanup(self):
-            if self._camera_handle:
-                pass
+            if self._handle:
+                self._handle.stop()
 
 # Projectors
 
