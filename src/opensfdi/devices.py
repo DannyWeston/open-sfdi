@@ -261,10 +261,25 @@ if util.find_spec("picamera2"):
             # Picamera2 Handle
             self._handle = Picamera2()
 
-            self._config = self._handle.create_still_configuration(main={"format": "BGR888"})
+            self._config = self.__get_config()            
             self._handle.configure(self._config)
             self._handle.start()
 
+        def __get_config(self):
+            return self._handle.create_still_configuration(
+                main={
+                    "size": self.resolution,
+                    "format": "RGB888",
+                },
+                controls={
+                    "FrameRate" : self.refresh_rate
+                }
+            )
+
+        def __update_config(self):
+            self._config = self.__get_config()
+
+            self._handle.switch_mode(self._config)
             
         @property
         def resolution(self) -> tuple[int, int]:
@@ -274,8 +289,7 @@ if util.find_spec("picamera2"):
         def resolution(self, value: tuple[int, int]):
             self._resolution = value
 
-            # self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, value[0])
-            # self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, value[1])
+            self.__update_config()
 
         @property
         def refresh_rate(self) -> float:
@@ -285,7 +299,7 @@ if util.find_spec("picamera2"):
         def refresh_rate(self, value: float):
             self._refresh_rate = value
 
-            # self._camera_handle.set(cv2.CAP_PROP_FPS, value)
+            self.__update_config()
 
         def capture(self) -> image.Image:
             raw_data = self._handle.capture_array()
