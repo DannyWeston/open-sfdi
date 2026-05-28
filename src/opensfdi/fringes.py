@@ -22,35 +22,41 @@ def phase_to_coord(resolution, cam_coords, phasemap, stripe_count, use_x=True, b
 
     return projCoords
 
-def sinusoidal_pattern(resolution, num_stripes, phase=0.0, rotation=0.0) -> image.Image:
+def sinusoidal_pattern(resolution, num_stripes=[32.0], phases=[0.0], rotations=[0.0], intensities=[1.0]) -> image.Image:
     '''
         resolution: (width, height) in integer pixels\n
-        num_stripes: float for total number of oscillations\n
-        phase: float in radians for signal phase shift\n
-        rotation: float in radians for orientation of fringes\n
+        num_stripes: list[float] for total number of oscillations per channel\n
+        phases: list[float] in radians for channel phase shifts\n
+        rotations: list[float] in radians for channel fringe orientations\n
     '''
+
+    assert len(num_stripes) == len(phases) == len(rotations) == len(intensities)
 
     w, h = resolution
 
+    c = len(num_stripes)
+    
+    raw_data = np.empty(shape=(h, w, len(num_stripes)), dtype=np.float32)
+
     xs, ys = np.meshgrid(
-        np.linspace(0.0, 1.0, num=w),
-        np.linspace(0.0, 1.0, num=h)
+        np.linspace(0.0, 1.0, num=w, endpoint=False),
+        np.linspace(0.0, 1.0, num=h, endpoint=False),
+        indexing='xy'
     )
 
-    pixels =  (np.cos(rotation) * xs) - (np.sin(rotation) * ys)
+    for i in range(c)[::-1]:
+        pixels = (np.cos(rotations[i]) * xs) - (np.sin(rotations[i]) * ys)
 
-    # I(x, y) = cos(2 * pi * f * x - phi)
-    fringes = np.cos((pixels * 2.0 * np.pi * num_stripes) + phase, dtype=np.float32)
+        # I(x, y) = cos(2 * pi * f * x - phi)
+        fringes = np.cos((pixels * 2.0 * np.pi * num_stripes[i]) + phases[i], dtype=np.float32)
 
-    # Normalise fringes from [-1..1] to [0..1]
-    return image.Image(data=(fringes + 1.0) / 2.0)
+        # Normalise fringes from [-1..1] to [0..1]
+        # Use BGR method as mostly in OpenCV land...
+        raw_data[..., c - i - 1] = intensities[i] * ((fringes + 1.0) / 2.0)
 
-def bgr_sinusoidal_pattern(resolution, num_stripes, phases, rotations, channels=(1.0, 1.0, 1.0)):
-    r = channels[2] * sinusoidal_pattern(resolution, num_stripes[2], phases[2], rotations[2]).raw_data
-    g = channels[1] * sinusoidal_pattern(resolution, num_stripes[1], phases[1], rotations[1]).raw_data
-    b = channels[0] * sinusoidal_pattern(resolution, num_stripes[0], phases[0], rotations[0]).raw_data
+    if c == 1: raw_data = np.squeeze(raw_data)
 
-    return image.Image(data=np.dstack([b, g, r]))
+    return image.Image(data=raw_data)
 
 class StereoFringeProjection:
     def __init__(self):

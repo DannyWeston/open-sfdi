@@ -1,11 +1,10 @@
 import cv2
-import re
 import json_numpy
 import os
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Generic, Iterator, TypeVar
+from typing import Generic, TypeVar
 
 from . import utils
 from .image import FileImage, Image, ToInt
@@ -16,14 +15,6 @@ T = TypeVar('T')
 class IRepository(ABC, Generic[T]):
     @abstractmethod
     def Get(self, id) -> T:
-        raise NotImplementedError
-
-    @abstractmethod
-    def GetBy(self, regex, sorted: bool) -> Iterator[T]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def Find(self, regex: str, sorted: bool) -> list[str]:
         raise NotImplementedError
 
     @abstractmethod
@@ -39,42 +30,32 @@ class IRepository(ABC, Generic[T]):
         raise NotImplementedError
 
 class JSONRepository(IRepository[T]):
-    def __init__(self, storage_dir, overwrite=True):
-        self._storage_dir = storage_dir
+    def __init__(self, overwrite=True):
         self._overwrite = overwrite
         
     def Get(self, id: str) -> T:
-        found = self.Find(id, sorted=False)
+        path = Path(id)
 
-        if len(found) < 1:
-            raise Exception(f"'{id}' could not be found on disk")
+        if not path.exists():
+            raise Exception(f"'{path}' could not be found on disk")
+        
+        with open(path, "r") as jsonFile:
+            rawJson = json_numpy.load(jsonFile)
 
-        vc = self.__LoadConfig(id)
+        vc = utils.SerialisableMixin.from_dict(rawJson)
 
         if vc: return vc
         
         raise Exception(f"Could not construct {T.__class__.__name__} config")
 
-    def GetBy(self, regex, sorted) -> Iterator[T]:
-        yield from (self.__LoadConfig(file) for file in self.Find(regex, sorted))
-
-    def Find(self, regex: str, sorted) -> list[str]:
-        files = [file.stem for file in self._storage_dir.glob("*.json")]
-
-        files = list(filter(lambda name: re.match(regex, name), files))
-
-        if sorted: files.sort()
-
-        return files
-
     def Add(self, serialisable: T, id: str) -> None:
-        found = self.Find(id, False)
+        path = Path(id)
 
-        if 0 < len(found) and (not self._overwrite):
+        if path.exists() and (not self._overwrite):
             raise Exception(f"{id} already exists and cannot be saved (overwriting disabled)")
 
         # Save metadata
-        with open(self._storage_dir / f"{id}.json", "w") as jsonFile:
+        with open(path, "w") as jsonFile:
             json_numpy.dump(serialisable.to_dict(), jsonFile, indent=2)
 
     def Delete(self, id: str) -> bool:
@@ -83,16 +64,9 @@ class JSONRepository(IRepository[T]):
 
     def Update(self, serialisable: T) -> bool:
         # TODO: Implement
-        pass
-
-    def __LoadConfig(self, name):
-        with open(self._storage_dir / f"{name}.json", "r") as jsonFile:
-            rawJson = json_numpy.load(jsonFile)
-
-        return utils.SerialisableMixin.from_dict(rawJson)
+        raise NotImplementedError
 
 # Basic repository
-
 class FileImageRepo(IRepository[Image]):
     SUPPORTED_FILE_TYPES = [
         ".tif",
@@ -103,12 +77,8 @@ class FileImageRepo(IRepository[Image]):
         ".png"
     ]
 
-    def __init__(self, storageDir: Path, overwrite=True):
+    def __init__(self, overwrite=True):
         self.m_Overwrite = overwrite
-        self.m_StorageDir = storageDir
-
-    def __LoadImage(self, filename):
-        return FileImage(self.m_StorageDir / f"{filename}.{self.m_FileExt}")
 
     def Add(self, img: Image, id: str):
         ''' Save an image to a repository '''
@@ -118,39 +88,31 @@ class FileImageRepo(IRepository[Image]):
         if ext not in self.SUPPORTED_FILE_TYPES:
             raise Exception(f"Using a file type of '{ext}' is not supported")
 
-        found = self.Find(id)
+        path = Path(id)
 
-        if 0 < len(found) and (not self.m_Overwrite):
-            raise FileExistsError(f"Image with id {found[0]} already exists")
-
-        path = self.m_StorageDir / id
+        if path.exists() and (not self.m_Overwrite):
+            raise FileExistsError(f"Image at {path} already exists (overwriting disabled)")
+        
+        # TODO: Check file type
 
         # Save as float to disk
-        cv2.imwrite(str(path.resolve()), cv2.cvtColor(ToInt(img.raw_data), cv2.COLOR_RGB2BGR))
+        cv2.imwrite(str(path.resolve()), ToInt(img.raw_data))
 
     def Get(self, id: str) -> FileImage:
-        found = self.Find(id)
+        path = Path(id)
 
-        if len(found) < 1:
+        if not path.exists():
             raise FileNotFoundError(f"Could not find image with id '{id}'")
 
-        return self.__LoadImage(id)
+        return FileImage(Path(path))
 
-    def GetBy(self, regex, sorted=False) -> Iterator[Image]:
-        yield from (self.__LoadImage(fn) for fn in self.Find(regex, sorted))
-
-    def Find(self, regex: str, sorted=False) -> list[str]:
-        filenames = [file.stem for file in self.m_StorageDir.glob(f"*.")]
-
-        filenames = list(filter(lambda filename: re.match(regex, filename), filenames))
-
-        if sorted: filenames.sort()
-
-        return filenames
-
-    # NOT IMPLEMENTED
     def Delete(self, id) -> bool:
-        raise NotImplementedError
+        path = Path(id)
+
+        if not path.exists():
+            raise FileNotFoundError(f"Could not find image with id '{id}'")
+        
+        path.unlink()
 
     def Update(self, id, **kwargs) -> bool:
         raise NotImplementedError

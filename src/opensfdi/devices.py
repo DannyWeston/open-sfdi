@@ -11,15 +11,14 @@ from . import utils, image, characterisation as ch
 # Cameras
 
 class BaseCamera(utils.SerialisableMixin, ch.ICharable):
-    def __init__(self, resolution: tuple[int, int], refresh_rate: float, 
-                 exposure:int=0, auto_exposure=False, char:ch.ZhangChar=None):
+    def __init__(self, resolution: tuple[int, int], refresh_rate: float, char:ch.ZhangChar=None):
         
         self._char = char
 
         self._resolution = resolution
         self._refresh_rate = refresh_rate
-        self._exposure = exposure
-        self._auto_exposure = auto_exposure
+        self._exposure = 0
+        self._auto_exposure = 0
 
     @property
     def auto_exposure(self):
@@ -66,24 +65,24 @@ class BaseCamera(utils.SerialisableMixin, ch.ICharable):
 class OpenCVCamera(BaseCamera):
     _exclude_fields = {'_camera_handle'}
 
-    def __init__(self, resolution: tuple[int, int], refresh_rate: float, 
-                  exposure:int=0, auto_exposure=False, device_id:int=0, char:ch.ZhangChar=None):
-        super().__init__(resolution, refresh_rate, exposure=exposure, auto_exposure=auto_exposure, char=char)
+    def __init__(self, resolution: tuple[int, int], refresh_rate: float, device_id:int=0, char:ch.ZhangChar=None):
+        super().__init__(resolution, refresh_rate, char=char)
 
         api = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
 
         self._device_id = device_id
         self._camera_handle = cv2.VideoCapture(device_id, apiPreference=api)
-        self._set_cv_props()
+
+        # self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+        self._camera_handle.set(cv2.CAP_PROP_FPS, float(self.refresh_rate))
 
     def _set_cv_props(self):
         self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, float(self.resolution[0]))
         self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self.resolution[1]))
         self._camera_handle.set(cv2.CAP_PROP_FPS, float(self.refresh_rate))
-
-        print(self._camera_handle.get(cv2.CAP_PROP_AUTO_EXPOSURE))
-        print(self._camera_handle.get(cv2.CAP_PROP_EXPOSURE))
 
         # self._camera_handle.set(cv2.CAP_PROP_AUTO_EXPOSURE, -1 if self.auto_exposure else 1)
 
@@ -169,10 +168,10 @@ class FileCamera(BaseCamera):
         '_prefetch', '_preloaded_count', '_stop_event', '_prefetcher_thread', '_lock', '_xp'
     }
 
-    def __init__(self, resolution: tuple[int, int], refresh_rate: float, exposure:int=0, auto_exposure=False, images:list[image.FileImage]=None, prefetch=-1, 
+    def __init__(self, resolution: tuple[int, int], refresh_rate: float, images:list[image.FileImage]=None, prefetch=-1, 
         char:ch.ZhangChar=None
     ):
-        super().__init__(resolution, refresh_rate, exposure=exposure, auto_exposure=auto_exposure, char=char)
+        super().__init__(resolution, refresh_rate, char=char)
 
         self._images = images
 
@@ -249,9 +248,8 @@ if util.find_spec("picamera2"):
     class PiCamera(BaseCamera):
         _exclude_fields = {'_camera_handle'}
 
-        def __init__(self, resolution:tuple[int, int], refresh_rate:float, device_id:int = 0, exposure:int=0, auto_exposure=False, 
-                     char:ch.ZhangChar=None):
-            super().__init__(resolution, refresh_rate, exposure=exposure, auto_exposure=auto_exposure, char=char)
+        def __init__(self, resolution:tuple[int, int], refresh_rate:float, device_id:int = 0, char:ch.ZhangChar=None):
+            super().__init__(resolution, refresh_rate, char=char)
 
             # Capture an image
             self._init = False
