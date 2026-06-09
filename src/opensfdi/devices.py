@@ -12,7 +12,6 @@ from . import utils, image, characterisation as ch
 
 class BaseCamera(utils.SerialisableMixin, ch.ICharable):
     def __init__(self, resolution: tuple[int, int], refresh_rate: float, char:ch.ZhangChar=None):
-        
         self._char = char
 
         self._resolution = resolution
@@ -68,20 +67,21 @@ class OpenCVCamera(BaseCamera):
     def __init__(self, resolution: tuple[int, int], refresh_rate: float, device_id:int=0, char:ch.ZhangChar=None):
         super().__init__(resolution, refresh_rate, char=char)
 
-        api = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
+        self._api = cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY
 
         self._device_id = device_id
-        self._camera_handle = cv2.VideoCapture(device_id, apiPreference=api)
+        self._camera_handle = cv2.VideoCapture(device_id, apiPreference=self._api)
 
         # self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
-        self._camera_handle.set(cv2.CAP_PROP_FPS, float(self.refresh_rate))
+        self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
+        self._camera_handle.set(cv2.CAP_PROP_FPS, float(refresh_rate))
 
     def _set_cv_props(self):
         self._camera_handle.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, float(self.resolution[0]))
-        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self.resolution[1]))
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+        self._camera_handle.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
         self._camera_handle.set(cv2.CAP_PROP_FPS, float(self.refresh_rate))
 
         # self._camera_handle.set(cv2.CAP_PROP_AUTO_EXPOSURE, -1 if self.auto_exposure else 1)
@@ -97,7 +97,7 @@ class OpenCVCamera(BaseCamera):
     def device_id(self, value:int):
         self._device_id = value
 
-        self._camera_handle = cv2.VideoCapture(value, apiPreference=cv2.CAP_DSHOW)
+        self._camera_handle = cv2.VideoCapture(value, apiPreference=self._api)
         self._set_cv_props()
 
     @property

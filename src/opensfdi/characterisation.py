@@ -39,6 +39,10 @@ def draw_pois(img, poi_count, poi_coords, colour_by=None):
 
 # Characterisation Boards
 
+class NotCharacterisedException(Exception):
+    def __init__(self, *args):
+        super().__init__(*args)
+
 class CharacterisationBoard(ABC):
     def __init__(self, poi_count):
         self._poi_count = poi_count
