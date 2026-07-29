@@ -88,7 +88,7 @@ class StereoFringeProjection:
                 projector.display(pattern)
 
                 # Capture an image using the camera, and ensure to load it to correct context
-                out[index] = xp.asarray(camera.capture().raw_data)
+                out[index] = xp.asarray(camera.read().raw_data)
 
                 # Apply gamma correction to raw data if provided
                 if gamma_corrector: gamma_corrector.apply(out[index])

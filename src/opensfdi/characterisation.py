@@ -6,36 +6,40 @@ import cv2
 from abc import ABC, abstractmethod
 from . import image, utils
 
-def draw_pois(img, poi_count, poi_coords, colour_by=None):
+def draw_pois(img: image.Image, poi_count, poi_coords, colour_by=None):
     with utils.ProcessingContext.UseGPU(False):
         xp = utils.ProcessingContext().xp
 
-        img = utils.ToContext(xp, img)
-        if len(img.shape) == 2:
-            img = image.ExpandN(img, 3)
+        img_data = img.raw_data.copy()
+
+        img_data = utils.ToContext(xp, img_data)
+        if len(img_data.shape) == 2:
+            img_data = image.ExpandN(img_data, 3)
 
         poi_coords = utils.ToContext(xp, poi_coords)
 
         # draw_img = image.ToInt(img)
-        draw_img = image.ToInt(img.copy())
+        draw_img = image.ToInt(img_data.copy())
 
         # No colours to draw... easy task
         if colour_by is None:
-            return image.ToFloat(cv2.drawChessboardCorners(draw_img, poi_count, poi_coords, True))
-    
-        colour_by = utils.ToContext(xp, colour_by)
-        colour_by = image.Normalise(colour_by)
+            new_data = cv2.drawChessboardCorners(draw_img, poi_count, poi_coords, True)
+        else:
+            colour_by = utils.ToContext(xp, colour_by)
+            colour_by = image.Normalise(colour_by)
 
-        # Sort by individual reprojection errors
-        poi_coords = poi_coords[np.argsort(colour_by)]
-        poi_coords = poi_coords.astype(np.uint16)
+            # Sort by individual reprojection errors
+            poi_coords = poi_coords[np.argsort(colour_by)]
+            poi_coords = poi_coords.astype(np.uint16)
 
-        for i in range(len(poi_coords)):
-            # colour = (0.0, 1.0, 0.0) if reprojErrs[i] < 0 else (0.0, 0.0, 1.0)
-            colour = (0.0, 1.0 - colour_by[i], float(colour_by[i]))
-            draw_img = cv2.circle(draw_img, poi_coords[i], 3, colour, -1)
+            for i in range(len(poi_coords)):
+                # colour = (0.0, 1.0, 0.0) if reprojErrs[i] < 0 else (0.0, 0.0, 1.0)
+                colour = (0.0, 1.0 - colour_by[i], float(colour_by[i]))
+                draw_img = cv2.circle(draw_img, poi_coords[i], 3, colour, -1)
 
-        return image.ToFloat(draw_img)
+            new_data = draw_img
+
+        return image.Image(data=new_data)
 
 # Characterisation Boards
 
@@ -43,26 +47,16 @@ class NotCharacterisedException(Exception):
     def __init__(self, *args):
         super().__init__(*args)
 
-class CharacterisationBoard(ABC):
+class CharacterisationBoard(ABC, utils.SerialisableMixin):
     def __init__(self, poi_count):
         self._poi_count = poi_count
-        
-        self._debug = False
-    
-    @property
-    def debug(self):
-        return self._debug
-    
-    @debug.setter
-    def debug(self, value):
-        self._debug = value
 
     @property
     def poi_count(self):
         return self._poi_count
     
     @abstractmethod
-    def find_pois(self, img: np.ndarray):
+    def find_pois(self, img: np.ndarray, flags=0):
         raise NotImplementedError
     
     @abstractmethod
@@ -74,36 +68,38 @@ class CharacterisationBoard(ABC):
         raise NotImplementedError
 
 class Checkerboard(CharacterisationBoard):
+    _exclude_fields = {"_corners_cache"}
+    
     def __init__(self, poi_count=(7, 10), square_size=(0.018, 0.018)):
         super().__init__(poi_count)
 
         self._square_size = square_size
 
+        self._corners_cache = np.empty(shape=(poi_count[0] * poi_count[1], 1, 2), dtype=np.float32)
+
     @property
     def square_size(self):
         return self._square_size
 
-    def find_pois(self, img: np.ndarray):
-        # Change image to int if not already
-        img = image.ToInt(img)
-
-        # flags = cv2.CALIB_CB_EXHAUSTIVE
-        # result, corners = cv2.findChessboardCornersSB(uint_img, cb_size, flags=flags)
-        # if not result: return None
+    def find_pois(self, img: image.Image, flags=0):
+        img_data = image.ToInt(img.raw_data)
 
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
 
-            img = utils.ToContext(xp, img)
+            img_data = utils.ToContext(xp, img_data)
+            img_data = image.ToGrey(img_data)
 
-            result, corners = cv2.findChessboardCorners(img, self.poi_count)
+            result, self._corners_cache = cv2.findChessboardCornersSB(
+                img_data,
+                self.poi_count,
+                None,
+                flags
+            )
 
             if not result: return None
-
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
-            corners = cv2.cornerSubPix(img, corners, (11, 11), (-1, -1), criteria)
-
-        return corners.squeeze()
+            
+            return self._corners_cache.squeeze()
 
     def get_poi_coords(self, dtype=None):
         xp = utils.ProcessingContext().xp
@@ -130,58 +126,131 @@ class Checkerboard(CharacterisationBoard):
 
         return corners
 
-class CircleBoard(CharacterisationBoard):
-    def __init__(self, poi_count=(7, 10), spacing=(0.03, 0.03), circleDiameter=1.0, inverted=True, staggered=True, area_max=None, poi_mask=None):
-        super().__init__(poi_count)
+class BlobDetector(utils.SerialisableMixin):
+    _exclude_fields = {"_detector_params"}
 
-        self.m_CircleDiameter = circleDiameter
-        self._spacing = spacing
-
-        self._staggered = staggered
-        self.m_Inverted = inverted
-
-        self._poi_mask = poi_mask
-
+    def __init__(self, circularity=(0.0, 1.0), convexity=(0.75, 1.0), inertiaRatio=(0.5, 1.0), inverted=True, poiMask=(0.0, 1.0), maxArea=-1.0):
+        
         # Setup blob detector
-        self.m_DetectorParams = cv2.SimpleBlobDetector_Params()
+        self._detector_params = cv2.SimpleBlobDetector_Params() # type: cv2.SimpleBlobDetector_Params
 
-        self.m_DetectorParams.filterByCircularity = True
-        self.m_DetectorParams.filterByConvexity = True
-        self.m_DetectorParams.filterByInertia = True
-        self.m_DetectorParams.minCircularity = 0.6
-        self.m_DetectorParams.minConvexity = 0.75
-        self.m_DetectorParams.minInertiaRatio = 0.5
+        # Circularity
+        self._circularity = circularity
+        self._detector_params.filterByCircularity = True
+        self._detector_params.minCircularity = circularity[0]
+        self._detector_params.maxCircularity = circularity[1]
 
-        # Check if filter by area
-        if area_max is not None:
-            self.m_DetectorParams.filterByArea = True
-            self.m_DetectorParams.maxArea = area_max
+        # Convexity
+        self._convexity = convexity
+        self._detector_params.filterByConvexity = True
+        self._detector_params.minConvexity = convexity[0]
+        self._detector_params.maxConvexity = convexity[1]
 
-        else: self.m_DetectorParams.filterByArea = False
+        # Inertia Ratio
+        self._inertiaRatio = inertiaRatio
+        self._detector_params.filterByInertia = True
+        self._detector_params.minInertiaRatio = inertiaRatio[0]
+        self._detector_params.maxInertiaRatio = inertiaRatio[1]
 
+        # Filter by area
+        self._detector_params.filterByArea = (0 < maxArea)
+        if 0 < maxArea: self._detector_params.maxArea = maxArea
+
+        self._poiMask = poiMask
         # self.m_DetectorParams.minThreshold = int(poiMask * 255)
         # self.m_DetectorParams.maxThreshold = 255
         # self.m_DetectorParams.thresholdStep = 10
 
         # Filter by colour
-        self.m_DetectorParams.filterByColor = True
-        self.m_DetectorParams.blobColor = 255 if inverted else 0
+        self._inverted = inverted
+        self._detector_params.filterByColor = True
+        self._detector_params.blobColor = 255 if inverted else 0
 
-    def find_pois(self, img):
+    @property
+    def circularity(self):
+        return self._circularity
+
+    @circularity.setter
+    def circularity(self, value: tuple[float, float]):
+        self._circularity = value
+        self._detector_params.minCircularity = value[0]
+        self._detector_params.maxCircularity = value[1]
+
+    @property
+    def convexity(self):
+        return self._convexity
+
+    @convexity.setter
+    def convexity(self, value: tuple[float, float]):
+        self._convexity = value
+        self._detector_params.minConvexity = value[0]
+        self._detector_params.maxConvexity = value[1]
+
+    @property
+    def inertiaRatio(self):
+        return self._inertiaRatio
+
+    @inertiaRatio.setter
+    def inertiaRatio(self, value: tuple[float, float]):
+        self._inertiaRatio = value
+        self._detector_params.minInertiaRatio = value[0]
+        self._detector_params.maxInertiaRatio = value[1]
+
+    @property
+    def poiMask(self):
+        return self._poiMask
+
+    @poiMask.setter
+    def poiMask(self, value: tuple[float, float]):
+        self._poiMask = value
+
+    @property
+    def inverted(self):
+        return self._inverted
+
+    @inverted.setter
+    def inverted(self, value: bool):
+        self._inverted = inverted
+        self._detector_params.filterByColor = True
+        self._detector_params.blobColor = 255 if value else 0
+
+    @property
+    def maxArea(self):
+        return self._maxArea
+    
+    @maxArea.setter
+    def maxArea(self, value: float):
+        self._maxArea = value
+        self._detector_params.filterByArea = (0.0 < value)
+        if 0 < value: self._detector_params.maxArea = value
+
+    def make_detector(self) -> cv2.SimpleBlobDetector:
+        # Create a detector with the parameters
+        return cv2.SimpleBlobDetector_create(self._detector_params)
+
+class CircleBoard(CharacterisationBoard):
+    def __init__(self, poi_count=(7, 10), spacing=(0.03, 0.03), diameter=1.0, staggered=True, blob_detector=None):
+        super().__init__(poi_count)
+
+        self._diameter = diameter
+        self._spacing = spacing
+
+        self._staggered = staggered
+
+        self._blob_detector = blob_detector if blob_detector else BlobDetector()
+
+    def find_pois(self, img, flags=0):
         xp = utils.ProcessingContext().xp
 
-        # Create a detector with the parameters
-        detector = cv2.SimpleBlobDetector_create(self.m_DetectorParams)
-
-        flags = cv2.CALIB_CB_CLUSTERING
-        flags |= (cv2.CALIB_CB_ASYMMETRIC_GRID if self._staggered else cv2.CALIB_CB_SYMMETRIC_GRID)
+        flags |= cv2.CALIB_CB_CLUSTERING
+        flags |= (cv2.CALIB_CB_ASYMMETRIC_GRID if self.staggered else cv2.CALIB_CB_SYMMETRIC_GRID)
 
         # Convert to single channel
         img = image.ToGrey(img)
 
         # Apply threshold mask if present
-        if self._poi_mask is not None:
-            mask = image.ThresholdMask(img, min=self._poi_mask[0], max=self._poi_mask[1])
+        if self.blob_detector.poiMask is not None:
+            mask = image.ThresholdMask(img, *self.blob_detector.poiMask)
             img = img * mask
 
         # Convert to uint
@@ -200,8 +269,11 @@ class CircleBoard(CharacterisationBoard):
 
             # STUPID OPENCV DOESN'T SUPPORT UINT16s SO CONVERT IF NEEDED...
             # cv2.convertScaleAbs(img, dst=img, alpha=(xp.iinfo(xp.uint8).max / xp.iinfo(img.dtype).max))
-
-            result, corners = cv2.findCirclesGrid(img, self.poi_count, blobDetector=detector, flags=flags)
+            result, corners = cv2.findCirclesGrid(
+                img, self.poi_count,
+                blobDetector=self.blob_detector.make_detector(), 
+                flags=flags
+            )
 
             if not result: return None
 
@@ -215,12 +287,11 @@ class CircleBoard(CharacterisationBoard):
 
         w, h = self.poi_count
 
-        x_delta = self._spacing[0]
-        y_delta = self._spacing[1]
+        x_delta, y_delta = self.spacing[1]
 
         ys, xs = xp.mgrid[:h, :w].astype(dtype)
         xs *= x_delta
-        ys *= (y_delta / 2) if self._staggered else y_delta
+        ys *= (y_delta / 2) if self.staggered else y_delta
         
         return xp.vstack([xs.ravel(), ys.ravel(), xp.zeros(w * h, dtype=dtype)]).T
 
@@ -228,39 +299,31 @@ class CircleBoard(CharacterisationBoard):
         xp = utils.ProcessingContext().xp
 
         # TODO: Implement mechanism for calculating non-staggered centres
-        w, h = self._poi_count
+        w, h = self.poi_count
 
         # Assume Z = 0 for a flat board
         # XYZ Format
-        return xp.array([(w - 1) * self._spacing[1] / 2, (h - 0.5) * self._spacing[0] / 2, 0.0])
+        return xp.array([(w - 1) * self.spacing[1] / 2, (h - 0.5) * self.spacing[0] / 2, 0.0])
 
+    @property
+    def blob_detector(self) -> BlobDetector:
+        return self._blob_detector
+
+    @property
+    def spacing(self) -> tuple[float, float]:
+        return self._spacing
+    
+    @property
+    def diameter(self) -> float:
+        return self._diameter
+    
+    @property
+    def staggered(self) -> bool:
+        return self._staggered
 
 # Characterisation
 
-class ZhangJointChar(utils.SerialisableMixin):
-    def __init__(self, rotation, translation, reproj_err):
-        self._reproj_err = reproj_err
-
-        self._rotation = rotation
-        self._translation = translation
-
-    @property
-    def reproj_err(self):
-        return self._reproj_err
-
-    @property
-    def rotation(self):
-        return self._rotation
-    
-    @property
-    def translation(self):
-        return self._translation
-    
-    def __str__(self):
-        return f'<JointChar> Reprojection Error: {self._reproj_err:.4f}'
-
 class ZhangChar(utils.SerialisableMixin):
-    _exclude_fields = {'_pose_translations', '_pose_rotations'}
     # Rotation and Translation are the transformation from the characterisation board's frame to the camera frame.
     # The first pose (Oxyz1) is used to determine the camera offset from the board along with the Rotation (R) and Translation (T):
     # I.e: Cxyz1 =  (R   T) . Oxyz1
@@ -273,6 +336,7 @@ class ZhangChar(utils.SerialisableMixin):
     def __init__(self, rotation=None, translation=None, 
             intrinsic_mat=None, distort_mat=None, reproj_errs=None,
             sensor_size=None, focal_length=None, optical_centre=None,
+            rotation_to_other=None, translation_to_other=None,
             resolution=None, pose_poi_coords=None, board_poses=None,
         ):
 
@@ -280,6 +344,7 @@ class ZhangChar(utils.SerialisableMixin):
 
         self._rotation = rotation
         self._translation = translation
+
 
         self._intrinsic_mat = intrinsic_mat
         
@@ -297,11 +362,18 @@ class ZhangChar(utils.SerialisableMixin):
         self._pose_rotations = None
         self._pose_translations = None
 
+        self._rotation_to_other = rotation_to_other
+        self._translation_to_other = translation_to_other
+
         self._board_poses = board_poses
 
         self._focal_length = focal_length
         self._sensor_size = sensor_size
         self._optical_centre = optical_centre
+
+    @property
+    def exclude_fields(self):
+        return super().exclude_fields.union({'_pose_translations', '_pose_rotations'})
 
     @property
     def rotation(self):
@@ -371,9 +443,31 @@ class ZhangChar(utils.SerialisableMixin):
     #     )
 
     @property
+    def rotation_to_other(self):
+        return self._rotation_to_other
+    
+    @property
+    def translation_to_other(self):
+        return self._translation_to_other
+
+    @property
     def projection_mat(self):
         xp = utils.ProcessingContext().xp
         return xp.dot(xp.asarray(self.intrinsic_mat), self.extrinsic_mat)
+
+    @property
+    def is_characterised(self):
+        return  (self.intrinsic_mat is not None) \
+                and (self.distort_mat is not None) \
+                and (self.board_poses is not None)
+
+    @property
+    def reprojection_err(self):
+        if self._reproj_errs is None: return
+        
+        xp = utils.ProcessingContext().xp
+
+        return xp.sqrt(xp.mean(self._reproj_errs ** 2))
 
     def execute(self, board: CharacterisationBoard, poi_coords, resolution, extraFlags=None):
         w, h = resolution
@@ -463,34 +557,25 @@ class ZhangChar(utils.SerialisableMixin):
 
         return xp.asarray(pois).reshape(-1, 2)
 
-    def joint_char(self, other: ZhangChar, board: CharacterisationBoard) -> ZhangJointChar:
+    def joint_char(self, other: ZhangChar, board: CharacterisationBoard, flags=0) -> ZhangJointChar:
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
-            
-            flags = cv2.CALIB_FIX_INTRINSIC
+
             criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
 
             board_coords = board.get_poi_coords()
             obj_coords = xp.repeat(board_coords[xp.newaxis, ...], len(self.pose_poi_coords), axis=0)
 
-            reproj_rms, self._intrinsic_mat, self._distort_mat, other._intrinsic_mat, other._distort_mat, R, T, E, F = \
+            joint_rms_reproj, self._intrinsic_mat, self._distort_mat, other._intrinsic_mat, other._distort_mat, self._rotation_to_other, self._translation_to_other, E, F = \
                 cv2.stereoCalibrate(obj_coords, self.pose_poi_coords, other.pose_poi_coords,
                 self.intrinsic_mat, self.distort_mat, other.intrinsic_mat, other.distort_mat,
                 self.resolution, criteria=criteria, flags=flags
             )
-            
-            # Other reproj error (need to use R and T)
-            # for i in range(len(other._pose_rotations)):
-            #     _, R2, T2 = cv2.solvePnP(
-            #         obj_coords[i], self.pose_poi_coords[i], self.intrinsic_mat, self.distort_mat,
-            #         flags=cv2.SOLVEPNP_ITERATIVE
-            #     )
-                
-            #     R2 = cv2.Rodrigues(R2)[0]
-            #     other._pose_rotations[i] = cv2.Rodrigues(R @ R2)[0]
-            #     other._pose_translations[i] = R @ T2 + T.reshape(3, 1)
 
-            return ZhangJointChar(R, T, reproj_rms)
+            other._rotation_to_other = self.rotation_to_other.T
+            other._translation_to_other = -other._rotation_to_other @ self.translation_to_other
+
+            return joint_rms_reproj
 
     def calc_reproj_errs(self, obj_coords, poi_coords, intrinsic_mat, dist_mat, rotations, translations):
         reprojErrors = np.empty(shape=poi_coords.shape[:2], dtype=np.float32)
@@ -524,13 +609,11 @@ class ICharable(ABC):
     def __init__(self):
         raise NotImplementedError
     
-    @property
     @abstractmethod
-    def char(self):
+    def get_char(self):
         raise NotImplementedError
     
-    @property
     @abstractmethod
-    def resolution(self):
+    def get_resolution(self):
         raise NotImplementedError
         

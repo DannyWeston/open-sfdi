@@ -4,6 +4,7 @@ import cProfile
 import pstats
 import numpy as np
 
+from abc import abstractmethod
 from contextlib import contextmanager
 from typing import ClassVar, Set
 
@@ -53,13 +54,9 @@ class ProcessingContext:
 
 class SerialisableMixin:
     _type_registry: ClassVar[dict] = {}
-    _exclude_fields: ClassVar[Set[str]] = set()  # Excludes
     
     def __init_subclass__(cls):
         cls._type_registry[cls.__name__] = cls
-        
-        # Exclude fields
-        cls._exclude_fields = getattr(cls, '_exclude_fields', set())
         
         super().__init_subclass__()
     
@@ -69,7 +66,7 @@ class SerialisableMixin:
         
         for key, value in self.__dict__.items():
             # Skip fields in exclude list
-            if key in self._exclude_fields:
+            if key in self.exclude_fields:
                 continue
 
             # Remove trailing underscores
@@ -94,8 +91,12 @@ class SerialisableMixin:
         data['__type__'] = self.__class__.__name__
         return data
 
+    @property
+    def exclude_fields(self) -> Set[str]:
+        return set()
+    
     @classmethod
-    def from_dict(cls, data: dict):
+    def from_dict(cls, data: dict) -> object:
         """Create object from dict"""
         type_name = data.pop('__type__')
 
@@ -114,6 +115,24 @@ class SerialisableMixin:
             vars[key] = value
 
         return subclass(**vars)
+
+# class CallbackProtocol(Protocol):
+#     def __call__(self, *args: Any, **kwargs: Any) -> None:
+#         ...
+
+# @dataclass
+# class EventEmitter:
+#     _callbacks: list[CallbackProtocol] = None
+    
+#     def __post_init__(self):
+#         self._callbacks = []
+    
+#     def on_trigger(self, callback: CallbackProtocol):
+#         self._callbacks.append(callback)
+    
+#     def trigger(self, *args, **kwargs):
+#         for cb in self._callbacks:
+#             cb(*args, **kwargs)
 
 
 def TransMat(R, T):

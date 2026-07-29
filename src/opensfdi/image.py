@@ -48,7 +48,6 @@ class FileImage(Image):
     def __str__(self):
         return f"<FileImage> : {self.path.absolute()}"
 
-
 # Utility methods
 
 def RGB(w:int, h:int, r: float, g: float, b: float):
@@ -83,7 +82,7 @@ def ToInt(rawData):
         return rawData
     
     if (dtype == xp.float32) or (dtype == xp.float64):
-        return (rawData * xp.iinfo(xp.uint8).max).astype(xp.uint8)
+        return (rawData * xp.iinfo(xp.uint8).max).astype(xp.uint8, copy=False)
     
     raise Exception(f"Image must be in float format (found {rawData.dtype})")
 
@@ -94,7 +93,10 @@ def ToGrey(rawData):
     if rawData.ndim == 3:
         c = rawData.shape[2]
         if c == 1: return rawData.squeeze()
-        if c == 3: return rawData[:, :, 2].squeeze() # Keep red channel for now
+
+        return cv2.cvtColor(rawData, cv2.COLOR_BGR2GRAY)
+
+        # if c == 3: return rawData[:, :, 2].squeeze() # Keep red channel for now
 
     raise Exception("Image is in unrecognised format")
 
@@ -261,7 +263,9 @@ def show_img(rawData, name='Image', wait=0, size=None):
 
         cv2.imshow(name, rawData)
 
-        return cv2.waitKey(wait)
+        cv2.waitKey(wait)
+
+        return None
 
 def ShowScatter(xss, yss):
     fig = plt.figure()
