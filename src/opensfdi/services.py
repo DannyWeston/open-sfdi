@@ -157,7 +157,7 @@ class PointCloudFileRepo(PointCloudRepo):
             raise Exception(f"File type {file_ext} not supported")
         self._file_ext = file_ext
 
-        self._base_dir = Path("measurements") if base_dir is None else base_dir
+        self._base_dir = Path("data/measurements") if base_dir is None else base_dir
 
         self._base_dir.mkdir(exist_ok=True)
 
@@ -287,7 +287,7 @@ class FileImageRepo(ImageRepo):
                 raise PermissionError(f"No write permissions to {base_dir.absolute()}")
             
             self._base_dir = base_dir
-        else: self._base_dir = Path("imgs")
+        else: self._base_dir = Path("data/imgs")
 
     @property
     def base_dir(self) -> Path:
