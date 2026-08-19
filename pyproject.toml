@@ -17,14 +17,18 @@ scikit-image = "^0.26.0"
 json-numpy = "^2.1.1"
 treelib = "^1.8.0"
 vedo = "^2026.6.1"
+ffmpeg-python = "^0.2.0"
+
+cupy-cuda12x = {version = "^14.0.1", optional = true}
+picamera2 = {version = "^0.3.34", markers = "platform_machine == 'aarch64'", optional = true}
+
+[tool.poetry.extras]
+cuda = ["cupy-cuda12x"]
+picamera2 = ["picamera2"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
 memory-profiler = "^0.61.0"
-
-[tool.poetry.group.extras.dependencies]
-cupy-cuda12x = {extras = ["ctk"], version = "^14.0.1"}
-picamera2 = {version = "^0.3.34", markers = "platform_machine == 'aarch64'"}
 
 [build-system]
 requires = ["poetry-core"]

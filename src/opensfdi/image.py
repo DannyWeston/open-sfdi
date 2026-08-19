@@ -41,7 +41,7 @@ class FileImage(Image):
         if not self._preloaded:
             # cv2 load
             self.m_RawData = cv2.imread(str(self._path.resolve()), flags=cv2.IMREAD_UNCHANGED)
-            self.m_RawData = self.m_RawData.astype(np.float32) / np.iinfo(self.m_RawData.dtype).max # Default to float32
+            self.m_RawData = ToInt(self.m_RawData) # Default to int
             
             self._preloaded = True
 
@@ -51,12 +51,15 @@ class FileImage(Image):
 # Utility methods
 
 def RGB(w:int, h:int, r: float, g: float, b: float):
-    raw_data = np.ones(shape=(h, w, 3), dtype=np.float32)
+    raw_data = np.ones(shape=(h, w, 3), dtype=np.uint8)
     raw_data[..., 0] *= b
     raw_data[..., 1] *= g
     raw_data[..., 2] *= r
 
     return Image(raw_data)
+
+def BW(w:int, h:int, v):
+    return Image(np.ones(shape=(h, w), dtype=np.uint8) * v)
 
 def ToFloat(rawData):
     xp = utils.ProcessingContext().xp
@@ -153,6 +156,16 @@ def ThresholdMask(data, min=0.1, max=0.9):
     valid = (data > min) & (data < max)
     
     return mask & valid
+
+def ACDCMask(img, ac_mask=None, dc_mask=None):
+    xp = utils.ProcessingContext().xp
+
+    mask = xp.ones(img.shape, dtype=xp.bool_)
+
+    if ac_mask: mask &= ThresholdMask(img, ac_mask[0], ac_mask[1])
+    if dc_mask: mask &= ThresholdMask(img, dc_mask[0], dc_mask[1])
+
+    return mask
 
 def Normalise(data):
     xp = utils.ProcessingContext().xp
@@ -256,16 +269,15 @@ def show_img(rawData, name='Image', wait=0, size=None):
                 cv2.setWindowProperty(name, cv2.WND_PROP_TOPMOST, 1)
                 _, _, w, h = cv2.getWindowImageRect(name)
 
-            else: w, h = size
+            else: 
+                w, h = size
 
         rawData = cv2.resize(rawData, (w, h))
         cv2.resizeWindow(name, w, h)
 
         cv2.imshow(name, rawData)
 
-        cv2.waitKey(wait)
-
-        return None
+        return cv2.waitKey(wait)
 
 def ShowScatter(xss, yss):
     fig = plt.figure()

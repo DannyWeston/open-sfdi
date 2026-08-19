@@ -7,7 +7,7 @@ def phase_to_coord(resolution, cam_coords, phasemap, stripe_count, use_x=True, b
 
     w, h = resolution
 
-    projCoords = xp.empty((len(cam_coords)))
+    proj_coords = xp.empty((len(cam_coords)))
 
     period = (w if use_x else h) / stripe_count
 
@@ -18,9 +18,9 @@ def phase_to_coord(resolution, cam_coords, phasemap, stripe_count, use_x=True, b
             coords = cam_coords[i].astype(xp.uint16)
             phi = phasemap[coords[1], coords[0]]
 
-        projCoords[i] = (phi / (xp.pi * 2.0)) * period
+        proj_coords[i] = (phi / (xp.pi * 2.0)) * period
 
-    return projCoords
+    return proj_coords
 
 def sinusoidal_pattern(resolution, num_stripes=[32.0], phases=[0.0], rotations=[0.0], intensities=[1.0]) -> image.Image:
     '''
@@ -72,7 +72,7 @@ class StereoFringeProjection:
         pattern = None
 
         if out is None:
-            out = xp.empty(shape=(sum(phase_counts), *camera.shape), dtype=xp.float32)
+            out = xp.empty(shape=(sum(phase_counts), camera.get_resolution()), dtype=xp.float32)
 
         l = 0
 
@@ -84,7 +84,7 @@ class StereoFringeProjection:
                 index += ((phase_count-j) % phase_count) if reverse else j
 
                 # Generate fringes and display them on the projector
-                pattern = image.make_fringe_pattern(projector.resolution, stripe_count, phase, rotation)
+                pattern = image.make_fringe_pattern(projector.get_resolution()[::-1], stripe_count, phase, rotation)
                 projector.display(pattern)
 
                 # Capture an image using the camera, and ensure to load it to correct context
@@ -112,7 +112,7 @@ class StereoFringeProjection:
             shifted[i], ac, dc = shifter.shift(imgs[completed:completed+N])
 
             if i == 0:
-                ac_img = ac 
+                ac_img = ac
                 dc_img = dc
 
             completed += N
@@ -122,21 +122,23 @@ class StereoFringeProjection:
 
     def reconstruct(self, phasemap, camera: devices.BaseCamera, projector: devices.BaseProjector, stripe_count, use_x=True):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
-
         xp = utils.ProcessingContext().xp
 
         # TODO: Check workingResolution with resolution being used
         # So correct scaling can be applied
-        c_w, c_h = camera.resolution
-        p_w, p_h = projector.resolution
+        c_w, c_h = camera.get_resolution()
+        p_w, p_h = projector.get_resolution()
         camY, camX = xp.mgrid[:c_h, :c_w].astype(xp.float32)
 
         period = (p_w if use_x else p_h) / stripe_count
         projCoords = (phasemap / (xp.pi * 2.0)) * period
 
+        cam_char = camera.get_char()
+        proj_char = projector.get_char()
+
         return self.__triangulate(
-            xp.asarray(camera.char.projection_mat),
-            xp.asarray(projector.char.projection_mat),
+            xp.asarray(cam_char.projection_mat),
+            xp.asarray(proj_char.projection_mat),
             camX, camY, projCoords, use_x
         )
 
@@ -175,7 +177,9 @@ class StereoFringeProjection:
 
         points = xp.dstack([worldX, worldY, worldZ])
 
-        return points.reshape((*cam_x.shape[:2], 3))
+        h, w, *_ = cam_x.shape
+
+        return points.reshape((h * w, 3))
 
     @property
     def alignToCamera(self) -> bool:

@@ -36,26 +36,29 @@ class NStepShifter(Shifter):
 
         N = len(imgs)
 
+        imgs_f32 = xp.asarray([image.ToFloat(img) for img in imgs])
+
         # Generate phases (weird reshape for making sure it matches image channel count)
         phases = xp.arange(N) * 2.0 * xp.pi / N
 
-        sin_phases = xp.sin(phases)
-        cos_phases = xp.cos(phases)
+        sin_phases = xp.sin(phases, dtype=xp.float32)
+        cos_phases = xp.cos(phases, dtype=xp.float32)
 
-        a = xp.zeros_like(imgs[0])
-        b = xp.zeros_like(imgs[0])
+        a = xp.zeros_like(imgs_f32[0])
+        b = xp.zeros_like(imgs_f32[0])
 
-        for i, img in enumerate(imgs):
+        for i, img in enumerate(imgs_f32):
             a += img * sin_phases[i]
             b -= img * cos_phases[i]
 
-        ac_img = (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)
-        dc_img = xp.mean(imgs, axis=0)
+        phasemap = -xp.arctan2(a, b)
+        phasemap += xp.pi
 
-        result = -xp.arctan2(a, b)
-        result += xp.pi
+        ac_img = image.ToInt((2.0 / N) * xp.sqrt(a ** 2 + b ** 2, dtype=xp.float32))
+        dc_img = image.ToInt(xp.mean(imgs_f32, axis=0, dtype=xp.float32))
 
-        return result, ac_img, dc_img
+
+        return phasemap, ac_img, dc_img
 
 
 # Phase Unwrapping
@@ -122,6 +125,6 @@ class MultiFrequencyUnwrapper(Unwrapper):
 
 # Utils
 
-def show_phasemap(phasemap, name='Phasemap', size=None):
+def show_phasemap(phasemap, name='Phasemap', wait=0, size=None):
     with utils.ProcessingContext.UseGPU(False):
-        image.show_img(image.Normalise(phasemap), name, size=size)
+        image.show_img(image.Normalise(phasemap), name, wait=wait, size=size)

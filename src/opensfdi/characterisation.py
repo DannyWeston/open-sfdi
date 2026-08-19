@@ -6,7 +6,7 @@ import cv2
 from abc import ABC, abstractmethod
 from . import image, utils
 
-def draw_pois(img: image.Image, poi_count, poi_coords, colour_by=None):
+def draw_pois(img: image.Image, poi_count, poi_coords, colour_by=None, numbered=False):
     with utils.ProcessingContext.UseGPU(False):
         xp = utils.ProcessingContext().xp
 
@@ -21,25 +21,30 @@ def draw_pois(img: image.Image, poi_count, poi_coords, colour_by=None):
         # draw_img = image.ToInt(img)
         draw_img = image.ToInt(img_data.copy())
 
-        # No colours to draw... easy task
+
         if colour_by is None:
-            new_data = cv2.drawChessboardCorners(draw_img, poi_count, poi_coords, True)
+            draw_img = cv2.drawChessboardCorners(draw_img, poi_count, poi_coords, True)
         else:
             colour_by = utils.ToContext(xp, colour_by)
             colour_by = image.Normalise(colour_by)
 
             # Sort by individual reprojection errors
+            poi_coords = poi_coords.astype(xp.uint16)
             poi_coords = poi_coords[np.argsort(colour_by)]
-            poi_coords = poi_coords.astype(np.uint16)
 
             for i in range(len(poi_coords)):
                 # colour = (0.0, 1.0, 0.0) if reprojErrs[i] < 0 else (0.0, 0.0, 1.0)
-                colour = (0.0, 1.0 - colour_by[i], float(colour_by[i]))
+                colour = (0, 255 - colour_by[i], colour_by[i])
                 draw_img = cv2.circle(draw_img, poi_coords[i], 3, colour, -1)
 
-            new_data = draw_img
+        if numbered:
+            poi_coords = poi_coords.astype(xp.uint16)
 
-        return image.Image(data=new_data)
+            for i in range(len(poi_coords)):
+                colour = (255, 0, 0)
+                draw_img = cv2.putText(draw_img, str(i),  poi_coords[i], cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        return image.Image(data=draw_img)
 
 # Characterisation Boards
 
@@ -56,7 +61,7 @@ class CharacterisationBoard(ABC, utils.SerialisableMixin):
         return self._poi_count
     
     @abstractmethod
-    def find_pois(self, img: np.ndarray, flags=0):
+    def find_pois(self, img: np.ndarray, *args, **kwargs):
         raise NotImplementedError
     
     @abstractmethod
@@ -81,21 +86,29 @@ class Checkerboard(CharacterisationBoard):
     def square_size(self):
         return self._square_size
 
-    def find_pois(self, img: image.Image, flags=0):
-        img_data = image.ToInt(img.raw_data)
+    def find_pois(self, img_data, sb=False, flags=0):
+        img_data2 = image.ToInt(img_data)
 
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
 
-            img_data = utils.ToContext(xp, img_data)
-            img_data = image.ToGrey(img_data)
+            img_data2 = utils.ToContext(xp, img_data2)
+            img_data2 = image.ToGrey(img_data2)
 
-            result, self._corners_cache = cv2.findChessboardCornersSB(
-                img_data,
-                self.poi_count,
-                None,
-                flags
-            )
+            if sb:
+                result, self._corners_cache = cv2.findChessboardCornersSB(
+                    img_data2,
+                    self.poi_count,
+                    None,
+                    flags
+                )
+            else:
+                result, self._corners_cache = cv2.findChessboardCorners(
+                    img_data2,
+                    self.poi_count,
+                    None,
+                    flags
+                )
 
             if not result: return None
             
@@ -557,7 +570,7 @@ class ZhangChar(utils.SerialisableMixin):
 
         return xp.asarray(pois).reshape(-1, 2)
 
-    def joint_char(self, other: ZhangChar, board: CharacterisationBoard, flags=0) -> ZhangJointChar:
+    def joint_char(self, other: ZhangChar, board: CharacterisationBoard, flags=0):
         with utils.ProcessingContext.UseGPU(False):
             xp = utils.ProcessingContext().xp
 

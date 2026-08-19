@@ -257,8 +257,10 @@ class BaseCamera(utils.SerialisableMixin, ch.ICharable):
         self.stop_async()
 
     def __str__(self):
+        char = self.get_char()
+
         v = "<Camera>"
-        v += f" {self.char}" if self.char else " (Not Characterised)"
+        v += f" {char}" if char.is_characterised else " (Not Characterised)"
         return v
 
 class OpenCVCamera(BaseCamera):
@@ -506,42 +508,30 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
     _exclude_fields = {'_debug', '_should_undistort'}
 
     @abstractmethod
-    def __init__(self, char:ch.ZhangChar=None):
-        self._char = char
+    def __init__(self, resolution: tuple[int, int], refresh_rate=30.0, throw_ratio:float=1.0, char:ch.ZhangChar=None):
+        self._char = ch.ZhangChar() if (char is None) else char
+        self._resolution = resolution
+        self._refresh_rate = refresh_rate
+        self._throw_ratio = throw_ratio
 
         self._should_undistort = True
-        self._debug = False
 
-    @property
-    def char(self) -> ch.ZhangChar:
+    def get_char(self):
         return self._char
+    
+    def get_resolution(self):
+        return self._resolution
 
-    @property
-    @abstractmethod
-    def resolution(self) -> tuple[int, int]:
-        raise NotImplementedError
+    def get_refresh_rate(self):
+        return self._refresh_rate
 
-    @property
-    @abstractmethod
-    def refresh_rate(self) -> float:
-        raise NotImplementedError
-
-    @property
-    @abstractmethod
-    def throw_ratio(self) -> float:
-        raise NotImplementedError
+    def get_throw_ratio(self):
+        return self._throw_ratio
     
     @property
     def aspect_ratio(self):
-        return self.resolution[0] / self.resolution[1]
-
-    @property
-    def debug(self):
-        return self._debug
-    
-    @debug.setter
-    def debug(self, value):
-        self._debug = value
+        w, h =  self.get_resolution()
+        return w / h
 
     @abstractmethod
     def display(self, img: image.Image):
@@ -553,10 +543,9 @@ class BaseProjector(utils.SerialisableMixin, ch.ICharable):
     def __str__(self):
         v = "<Projector>"
 
-        if self.char:
-            v += f" {self.char}"
+        char = self.get_char()
 
-        else: v += " (Not Characterised)"
+        v += f" {char}" if char else " (Not Characterised)"
 
         return v
 

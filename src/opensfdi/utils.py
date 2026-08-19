@@ -14,27 +14,44 @@ class ProcessingContext:
     def __new__(cls):
         if cls.__Instance is None:
             cls.__Instance = super().__new__(cls)
-            cls.__Instance.UseGPU = False
+            cls.__Instance._use_gpu = False
             cls.__Instance.m_Processor = np
 
         return cls.__Instance
     
+    # @classmethod
+    # @contextmanager
+    # def UseGPU(cls, value=False):
+    #     instance = cls()
+    #     previous = instance._use_gpu
+        
+    #     try:
+    #         instance._use_gpu = value
+    #         yield instance
+
+    #     finally:
+    #         instance._use_gpu = previous
+
     @classmethod
-    @contextmanager
     def UseGPU(cls, value=False):
         instance = cls()
-        previous = instance.UseGPU
         
-        try:
-            instance.UseGPU = value
-            yield instance
-
-        finally:
-            instance.UseGPU = previous
+        previous = instance._use_gpu
+        instance._use_gpu = value
+        if value: _ = instance.xp
+        
+        @contextmanager
+        def context_manager():
+            try:
+                yield instance
+            finally:
+                instance._use_gpu = previous
+        
+        return context_manager()
 
     @property
     def xp(self):
-        if self.UseGPU:
+        if self._use_gpu:
             if self.m_Processor != np: return self.m_Processor
             
             try:
@@ -50,7 +67,7 @@ class ProcessingContext:
         return self.m_Processor
 
     def __str__(self):
-        return f"ProcessingContext(UseGPU={self.UseGPU}"
+        return f"ProcessingContext(UseGPU={self._use_gpu})"
 
 class SerialisableMixin:
     _type_registry: ClassVar[dict] = {}

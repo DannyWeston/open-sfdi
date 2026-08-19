@@ -5,8 +5,7 @@ from pathlib import Path
 
 from vedo import Points, show
 
-from .devices import BaseCamera
-from . import characterisation, utils, image
+from . import utils, image
 
 # def AlignToCalibBoard(pc: np.ndarray, cam: BaseCamera, board: characterisation.CalibrationBoard):
 #     centreCoords = board.GetBoardCentreCoords()
@@ -21,33 +20,36 @@ from . import characterisation, utils, image
 
 #     return (R @ (pc.T + t)).T
 
-def np_to_cloud(np_cloud: np.ndarray, texture=None):
+def nan_filter(cloud):
     xp = utils.ProcessingContext().xp
 
-    # Filter out any NaNs from the point cloud and dc_img    
-    nan_points = xp.any(xp.isnan(np_cloud), axis=2)
-    valid_points = xp.bitwise_not(nan_points)
-    np_cloud = np_cloud[valid_points]
+    # Filter out any NaNs from the point cloud
+    return xp.bitwise_not(xp.any(xp.isnan(cloud), axis=1))
 
-    if texture is not None:
-        texture = texture[valid_points]
-        texture = image.ToInt(np.column_stack([texture, texture, texture]))
+def to_cloud(xp_cloud):
+    xp = utils.ProcessingContext().xp
 
     # Need array on CPU
     with utils.ProcessingContext.UseGPU(False):
         xp = utils.ProcessingContext().xp
 
-        np_cloud = utils.ToContext(xp, np_cloud)
-        texture = utils.ToContext(xp, texture)
+        xp_cloud = utils.ToContext(xp, xp_cloud)
 
-        point_cloud = Points(np_cloud)
+        return Points(xp_cloud)
 
-        if texture is not None:
-            point_cloud.pointcolors = texture
+def get_texture_coords(img):
+    xp = utils.ProcessingContext().xp
+    
+    h, w, *_ = img.shape
 
-        return point_cloud
+    u_coords = xp.linspace(0, 1, w)
+    v_coords = xp.linspace(0, 1, h)
 
-def filter_np_cloud(cloud, x=None, y=None, z=None):
+    uv_grid = xp.stack(xp.meshgrid(u_coords, v_coords, indexing='xy'), axis=-1)
+
+    return uv_grid.reshape(-1, 2)
+
+def xyz_filter(cloud, x=None, y=None, z=None):
     xp = utils.ProcessingContext().xp
 
     # Stop pointless alloc below :)
