@@ -215,9 +215,6 @@ def make_fringe_pattern(resolution, num_stripes, phase=0.0, rotation=0.0, dst=No
 
     return fringes
 
-def ac_component(imgs):
-    (2.0 / N) * xp.sqrt(a ** 2 + b ** 2)
-
 # Noise
 
 def AddGaussianNoise(rawData, sigma=0.01, mean=0.0, clip=True):
@@ -253,7 +250,7 @@ def AddSaltPepperNoise(rawData, saltPercent=0.05, pepperPercent=0.05):
 
 # Preview Methods
 
-def show_img(rawData, name='Image', wait=0, size=None):
+def show_img(rawData, name='Image', wait=0, size=None, close_key=27):
     with utils.ProcessingContext.UseGPU(False):     # cv2 needs numpy
         xp = utils.ProcessingContext().xp
 
@@ -277,7 +274,13 @@ def show_img(rawData, name='Image', wait=0, size=None):
 
         cv2.imshow(name, rawData)
 
-        return cv2.waitKey(wait)
+        key = cv2.waitKey(wait)
+
+        if key == close_key:
+            cv2.destroyWindow(name)
+            return True
+
+        return False
 
 def ShowScatter(xss, yss):
     fig = plt.figure()

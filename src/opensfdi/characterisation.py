@@ -619,14 +619,9 @@ class ZhangChar(utils.SerialisableMixin):
 
 class ICharable(ABC):
     @abstractmethod
-    def __init__(self):
-        raise NotImplementedError
-    
-    @abstractmethod
     def get_char(self):
         raise NotImplementedError
-    
+
     @abstractmethod
-    def get_resolution(self):
+    def characterise(self, board: Checkerboard, coords, flags:int=0):
         raise NotImplementedError
-        

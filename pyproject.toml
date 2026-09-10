@@ -6,7 +6,7 @@ authors = [
     {name = "Daniel Weston", email = "danielweston37@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.13,<4.0"
+requires-python = "=3.13.*"
 
 [tool.poetry.dependencies]
 opencv-python = "^4.13.0.92"
@@ -20,11 +20,14 @@ vedo = "^2026.6.1"
 ffmpeg-python = "^0.2.0"
 
 cupy-cuda12x = {version = "^14.0.1", optional = true}
+PySide6 = { version = "^6.10.2", optional = true }
 picamera2 = {version = "^0.3.34", markers = "platform_machine == 'aarch64'", optional = true}
+platformdirs = "^4.11.8"
 
 [tool.poetry.extras]
-cuda = ["cupy-cuda12x"]
+cupy = ["cupy-cuda12x"]
 picamera2 = ["picamera2"]
+pyside = ["PySide6"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

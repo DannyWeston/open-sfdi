@@ -1,6 +1,7 @@
 import numpy as np
 
-from . import image, utils, devices, colour, phase
+from . import image, utils, colour, phase
+from .devices import projector, camera
 
 def phase_to_coord(resolution, cam_coords, phasemap, stripe_count, use_x=True, bilinear=True):
     xp = utils.ProcessingContext().xp
@@ -29,40 +30,67 @@ def sinusoidal_pattern(resolution, num_stripes=[32.0], phases=[0.0], rotations=[
         phases: list[float] in radians for channel phase shifts\n
         rotations: list[float] in radians for channel fringe orientations\n
     '''
-
     assert len(num_stripes) == len(phases) == len(rotations) == len(intensities)
+
+    xp = utils.ProcessingContext().xp
 
     w, h = resolution
 
     c = len(num_stripes)
     
-    raw_data = np.empty(shape=(h, w, len(num_stripes)), dtype=np.float32)
+    raw_data = xp.empty(shape=(h, w, len(num_stripes)), dtype=xp.float32)
 
-    xs, ys = np.meshgrid(
-        np.linspace(0.0, 1.0, num=w, endpoint=False),
-        np.linspace(0.0, 1.0, num=h, endpoint=False),
+    xs, ys = xp.meshgrid(
+        xp.linspace(0.0, 1.0, num=w, endpoint=False),
+        xp.linspace(0.0, 1.0, num=h, endpoint=False),
         indexing='xy'
     )
 
     for i in range(c)[::-1]:
-        pixels = (np.cos(rotations[i]) * xs) - (np.sin(rotations[i]) * ys)
+        pixels = (xp.cos(rotations[i]) * xs) - (xp.sin(rotations[i]) * ys)
 
         # I(x, y) = cos(2 * pi * f * x - phi)
-        fringes = np.cos((pixels * 2.0 * np.pi * num_stripes[i]) + phases[i], dtype=np.float32)
+        fringes = xp.cos((pixels * 2.0 * xp.pi * num_stripes[i]) + phases[i], dtype=xp.float32)
 
         # Normalise fringes from [-1..1] to [0..1]
         # Use BGR method as mostly in OpenCV land...
         raw_data[..., c - i - 1] = intensities[i] * ((fringes + 1.0) / 2.0)
 
-    if c == 1: raw_data = np.squeeze(raw_data)
+    if c == 1: raw_data = xp.squeeze(raw_data)
 
     return image.Image(data=raw_data)
+
+def gather_gamma_imgs(camera: camera.Camera, projector: projector.Projector, intensities):
+    xp = utils.ProcessingContext().xp
+
+    captured_imgs = []
+
+    for intensity in intensities:
+        project_img = xp.ones(projector.shape, dtype=xp.float32) * intensity
+
+        # TODO: Callbacks
+        projector.display(project_img)
+
+        captured_imgs.append(camera._capture().raw_data)
+
+    return xp.asarray(captured_imgs)
+
+    # Find first observable change of values for averages (left and right sides) i.e >= delta
+    # s, f = DetectableIndices(averages, delta)
+
+    # vis_averages = averages[s:f+1]
+    # vis_intensities = intensities[s:f+1]
+
+    # coeffs = xp.polyfit(vis_averages, vis_intensities, order)
+    # visible = intensities[s:f+1]
+
+    # return coeffs, visible
 
 class StereoFringeProjection:
     def __init__(self):
         pass
 
-    def gather_imgs(self, camera: devices.BaseCamera, projector: devices.BaseProjector, phase_counts, stripe_counts, rotation, reverse=False, gamma_corrector:colour.GammaCorrector=None, out=None):
+    def gather_imgs(self, camera: camera.Camera, projector: projector.Projector, phase_counts, stripe_counts, rotation, reverse=False, gamma_corrector:colour.GammaCorrector=None, out=None):
         ''' Captures and returns images using correct context '''
         assert(len(stripe_counts) == len(phase_counts))
 
@@ -71,8 +99,11 @@ class StereoFringeProjection:
 
         pattern = None
 
+        cam_w, cam_h = camera.get_settings().resolution
+        proj_w, proj_h = projector.get_settings().resolution
+
         if out is None:
-            out = xp.empty(shape=(sum(phase_counts), camera.get_resolution()), dtype=xp.float32)
+            out = xp.empty(shape=(sum(phase_counts), cam_h, cam_w), dtype=xp.float32)
 
         l = 0
 
@@ -84,11 +115,11 @@ class StereoFringeProjection:
                 index += ((phase_count-j) % phase_count) if reverse else j
 
                 # Generate fringes and display them on the projector
-                pattern = image.make_fringe_pattern(projector.get_resolution()[::-1], stripe_count, phase, rotation)
-                projector.display(pattern)
+                pattern = image.make_fringe_pattern((proj_h, proj_w), stripe_count, phase, rotation)
+                projector.project(pattern)
 
                 # Capture an image using the camera, and ensure to load it to correct context
-                out[index] = xp.asarray(camera.read().raw_data)
+                out[index] = xp.asarray(camera.capture().raw_data)
 
                 # Apply gamma correction to raw data if provided
                 if gamma_corrector: gamma_corrector.apply(out[index])
@@ -120,14 +151,14 @@ class StereoFringeProjection:
         # Calculate unwrapped phase maps
         return unwrapper.Unwrap(shifted), ac_img, dc_img
 
-    def reconstruct(self, phasemap, camera: devices.BaseCamera, projector: devices.BaseProjector, stripe_count, use_x=True):
+    def reconstruct(self, phasemap, camera: camera.Camera, projector: projector.Projector, stripe_count, use_x=True):
         """ Obtain a heightmap using a set of reference and measurement images using the already calibrated values """
         xp = utils.ProcessingContext().xp
 
         # TODO: Check workingResolution with resolution being used
         # So correct scaling can be applied
-        c_w, c_h = camera.get_resolution()
-        p_w, p_h = projector.get_resolution()
+        c_w, c_h = camera.get_settings().resolution
+        p_w, p_h = projector.get_settings().resolution
         camY, camX = xp.mgrid[:c_h, :c_w].astype(xp.float32)
 
         period = (p_w if use_x else p_h) / stripe_count
@@ -180,11 +211,3 @@ class StereoFringeProjection:
         h, w, *_ = cam_x.shape
 
         return points.reshape((h * w, 3))
-
-    @property
-    def alignToCamera(self) -> bool:
-        return self.m_AlignToCamera
-
-    @alignToCamera.setter
-    def alignToCamera(self, value: bool):
-        self.m_AlignToCamera = value

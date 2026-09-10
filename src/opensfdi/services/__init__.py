@@ -1,3 +1,7 @@
+from typing import Generic, TypeVar
+
+import platformdirs
+
 import cv2
 import json_numpy
 import os
@@ -10,11 +14,13 @@ from pathlib import Path
 
 from vedo import Points, load as vedo_load
 
-from . import utils
-from .image import FileImage, Image, ToInt
+from .. import utils
+from ..image import FileImage, Image, ToInt
 
 # Repositories
 
+APP_DIRS = platformdirs.PlatformDirs("dan3d")
+APP_DIRS.ensure_exists = True
 
 class IRepository(ABC):
     @abstractmethod
@@ -33,40 +39,25 @@ class IRepository(ABC):
     def Update(self, id, **kwargs) -> bool:
         raise NotImplementedError
 
-class JSONRepository(IRepository):
-    def __init__(self, overwrite=True):
+T = TypeVar('T')
+class JSONRepository(IRepository, Generic[T]):
+    def __init__(self, base_dir:Path=None, overwrite=True):
+        super().__init__()
+
         self._overwrite = overwrite
 
-    @property
-    def overwrite(self):
-        return self._overwrite
-        
-    def Get(self, id: str) -> utils.SerialisableMixin:
-        raise NotImplementedError
-
-    def Add(self, serialisable: utils.SerialisableMixin, id: str) -> None:
-        raise NotImplementedError
-
-    def Delete(self, id: str) -> bool:
-        # TODO: Implement
-        pass
-
-    def Update(self, serialisable: utils.SerialisableMixin) -> bool:
-        # TODO: Implement
-        raise NotImplementedError
-
-class FileJSONRepository(JSONRepository):
-    def __init__(self, base_dir:Path=None, overwrite=True):
-        super().__init__(overwrite=overwrite)
-
         if base_dir:
-            base_dir.mkdir(exist_ok=True)
+            base_dir.mkdir(exist_ok=True, parents=True)
 
             if not self._is_dir_writable(base_dir):
                 raise PermissionError(f"No write permissions to {base_dir.absolute()}")
             
             self._base_dir = base_dir
-        else: self._base_dir = Path("")
+        else: self._base_dir = APP_DIRS.user_data_path
+
+    @property
+    def overwrite(self):
+        return self._overwrite
 
     @property
     def base_dir(self) -> Path:
@@ -100,15 +91,13 @@ class FileJSONRepository(JSONRepository):
             raise Exception(f"{id} could not be found in {self.base_dir.absolute()}")
         
         with open(path, "r") as jsonFile:
+            # Convert json to entity
             raw_json = json_numpy.load(jsonFile)
-
-        vc = utils.SerialisableMixin.from_dict(raw_json)
-
-        if vc: return vc
+            return self._json_to_entity(raw_json)
         
-        raise Exception(f"Could not construct {vc.__class__.__name__}")
+        raise Exception(f"Could not construct {T.__class__.__name__}")
 
-    def Add(self, serialisable: utils.SerialisableMixin, id: str) -> None:
+    def Add(self, entity: T, id: str) -> None:
         if self.base_dir: path = self.base_dir / f"{id}.json"
         else: path = Path(f"{id}.json")
 
@@ -117,16 +106,24 @@ class FileJSONRepository(JSONRepository):
 
         # Save metadata
         with open(path, "w") as jsonFile:
-            json_numpy.dump(serialisable.to_dict(), jsonFile, indent=2)
+            # Convert entity to jsons
+            raw_json = self._entity_to_json(entity)
+
+            json_numpy.dumps
 
     def Delete(self, id: str) -> bool:
         # TODO: Implement
         pass
 
-    def Update(self, serialisable: utils.SerialisableMixin) -> bool:
+    def Update(self, entity: T) -> bool:
         # TODO: Implement
+        pass
+
+    def _json_to_entity(self, json) -> T:
         raise NotImplementedError
-    
+
+    def _entity_to_json(self, entity: T) -> dict:
+        raise NotImplementedError
 
 # Pointcloud Repository
 class PointCloudRepo(IRepository):
@@ -244,8 +241,6 @@ class PointCloudFileRepo(PointCloudRepo):
         raise NotImplementedError
 
 
-
-
 # Image repository
 
 class ImageRepo(IRepository):
@@ -273,21 +268,25 @@ class ImageRepo(IRepository):
         raise NotImplementedError
 
 class FileImageRepo(ImageRepo):
-    def __init__(self, base_dir:Path=None, overwrite=True, file_ext:str="png"):
+    DEFAULT_EXT = "bmp"
+    DEFAULT_DIR = Path(platformdirs.user_pictures_path())
+    TEMP_DIR = APP_DIRS.user_cache_path
+
+    def __init__(self, base_dir:Path=None, overwrite=True, file_ext:str="bmp"):
         super().__init__(overwrite=overwrite)
         
         if file_ext not in self.supported_file_types:
             raise Exception(f"File type {file_ext} not supported")
+        
         self._file_ext = file_ext
 
-        if base_dir:
-            base_dir.mkdir(exist_ok=True)
+        if base_dir is None: self._base_dir = FileImageRepo.DEFAULT_DIR
+        else: self._base_dir = base_dir
 
-            if not self._is_dir_writable(base_dir):
-                raise PermissionError(f"No write permissions to {base_dir.absolute()}")
-            
-            self._base_dir = base_dir
-        else: self._base_dir = Path("data/imgs")
+        self._base_dir.mkdir(exist_ok=True)
+
+        if not self._is_dir_writable(self._base_dir):
+            raise PermissionError(f"No write permissions to {base_dir.absolute()}")
 
     @property
     def base_dir(self) -> Path:
@@ -383,48 +382,47 @@ class VideoRepo(IRepository):
 
     def Add(self, img: Image): raise NotImplementedError
     
-    def Get(self, id): pass
+    def Get(self, id): raise NotImplementedError
 
-    def Delete(self, id) -> bool: pass
+    def Delete(self, id) -> bool: raise NotImplementedError
 
-    def Update(self, id, **kwargs) -> bool: pass
+    def Update(self, id, **kwargs) -> bool: raise NotImplementedError
+
+    def Flush(self): raise NotImplementedError
 
 class FileVideoRepo(VideoRepo):
     DEFAULT_EXT = ".mp4"
+    DEFAULT_DIR = Path(platformdirs.user_videos_dir())
+    TEMP_DIR = APP_DIRS.user_cache_path
 
     def __init__(self, resolution: tuple[int, int], fps, base_dir:Path=None, overwrite=True):
         super().__init__(overwrite=overwrite)
 
-        self._base_dir = base_dir
+        self._base_dir = base_dir if base_dir is not None else FileVideoRepo.DEFAULT_DIR
 
         self._resolution = resolution
         self._fps = fps
 
-        self._recording = False
-        self._writer = None
-
         self._flushed = False
 
-    def init(self):
-        if self._recording: return
-        
-        self._tempfile = tempfile.NamedTemporaryFile(dir=self._base_dir, 
+        # Make a temporary file to hold the recording
+        temp_file = tempfile.NamedTemporaryFile(dir=FileVideoRepo.TEMP_DIR, 
             prefix='recording_',
-            suffix=FileVideoRepo.DEFAULT_EXT, 
+            suffix=FileVideoRepo.DEFAULT_EXT,
             delete=False,
         )
-        
-        self._tempfile.close()
+
+        self._file_path = Path(temp_file.name)
+
+        temp_file.close()
 
         self._writer = ffmpeg \
-            .input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{self.resolution[0]}x{self.resolution[1]}', r=self.fps) \
-            .output(self._tempfile.name, vcodec='libx264', crf=23, preset='medium', pix_fmt='yuv420p') \
+            .input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{self.resolution[0]}x{self.resolution[1]}', use_wallclock_as_timestamps=True) \
+            .output(self._file_path.name, vcodec='libx265', crf=23, preset='medium', pix_fmt='yuv420p') \
             .overwrite_output() \
             .global_args('-loglevel', 'error') \
             .global_args('-y') \
-            .run_async(pipe_stdin=True, quiet=True)
-        
-        self._recording = True
+            .run_async(pipe_stdin=True)
 
     def _is_dir_writable(self, path: Path) -> bool:
         path = Path(path)
@@ -459,13 +457,13 @@ class FileVideoRepo(VideoRepo):
         return self._fps
 
     def Add(self, img: Image):
-        if not self._recording: self.init()
+        if self._flushed: return
 
         self._writer.stdin.write(img.raw_data.tobytes())
         self._writer.stdin.flush()
 
-    def Flush(self, id: str):
-        if not self._recording: return self
+    def Flush(self, id: str=None):
+        # TODO: Check if any frames were actually written
 
         if self._flushed:
             raise Exception("Video repository was already flushed, please create another!")
@@ -478,8 +476,9 @@ class FileVideoRepo(VideoRepo):
 
         output_path = self.base_dir / f"{id}{FileVideoRepo.DEFAULT_EXT}"
 
-        # Rename 
-        os.replace(self._tempfile.name, output_path)
+        # Rename
+        if id is not None:
+            os.replace(self._file_path, output_path)
 
     def Copy(self):
         return FileVideoRepo(base_dir=self.base_dir, resolution=self.resolution, fps=self.fps, overwrite=self.overwrite)
