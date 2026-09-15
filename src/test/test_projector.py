@@ -147,7 +147,7 @@ def test_calibration():
         camPOIs = xp.asarray(camPOIs)
 
         # Calibrate the camera
-        camReprojErrs, camRMSErr = camera_char.execute(
+        camReprojErrs, camRMSErr = camera_char.characterise(
             calibBoard, camPOIs, camera.resolution,
         )
         
@@ -168,7 +168,7 @@ def test_calibration():
         #     characterisation.ShowPOIs(xp.zeros(shape=(projector.shape)), poiCount, pois)
 
         # Now calibrate the projector
-        projReprojErrs, projRMSErr = projector_char.execute(
+        projReprojErrs, projRMSErr = projector_char.characterise(
             calibBoard, projPOIs, projector.resolution,
             extraFlags=cv2.CALIB_FIX_PRINCIPAL_POINT
         )

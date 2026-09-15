@@ -163,11 +163,11 @@ def test_calibration():
                 dc_imgs = xp.asarray(dc_imgs)
 
                 # Calibrate the camera
-                camReprojErrs, camRMSErr = camera_char.execute(calib_board, camera_pois, camera.resolution)
+                camReprojErrs, camRMSErr = camera_char.characterise(calib_board, camera_pois, camera.resolution)
                 print(f"Camera R_error: {camRMSErr:.2f} (std: {xp.std(camReprojErrs):.2f})")
 
                 # Now calibrate the projector
-                projReprojErrs, projRMSErr = projector_char.execute(
+                projReprojErrs, projRMSErr = projector_char.characterise(
                     calib_board, proj_pois, projector.resolution,
                     extraFlags=cv2.CALIB_FIX_PRINCIPAL_POINT
                 )

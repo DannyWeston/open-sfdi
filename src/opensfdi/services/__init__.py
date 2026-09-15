@@ -395,10 +395,21 @@ class FileVideoRepo(VideoRepo):
     DEFAULT_DIR = Path(platformdirs.user_videos_dir())
     TEMP_DIR = APP_DIRS.user_cache_path
 
-    def __init__(self, resolution: tuple[int, int], fps, base_dir:Path=None, overwrite=True):
+    SUPPORTED_EXTENSIONS = [
+        ".mp4", 
+        ".mov", 
+        ".avi"
+    ]
+
+    def __init__(self, resolution: tuple[int, int], fps, base_dir:Path=None, file_ext:str=None, overwrite=True):
         super().__init__(overwrite=overwrite)
 
         self._base_dir = base_dir if base_dir is not None else FileVideoRepo.DEFAULT_DIR
+
+        if file_ext not in FileVideoRepo.SUPPORTED_EXTENSIONS:
+            raise Exception("File extension not supported!")
+
+        self._file_ext = file_ext
 
         self._resolution = resolution
         self._fps = fps
@@ -408,17 +419,17 @@ class FileVideoRepo(VideoRepo):
         # Make a temporary file to hold the recording
         temp_file = tempfile.NamedTemporaryFile(dir=FileVideoRepo.TEMP_DIR, 
             prefix='recording_',
-            suffix=FileVideoRepo.DEFAULT_EXT,
+            suffix=self._file_ext,
             delete=False,
         )
 
-        self._file_path = Path(temp_file.name)
+        self._cache_path = FileVideoRepo.TEMP_DIR / temp_file.name
 
         temp_file.close()
 
         self._writer = ffmpeg \
             .input('pipe:', format='rawvideo', pix_fmt='bgr24', s=f'{self.resolution[0]}x{self.resolution[1]}', use_wallclock_as_timestamps=True) \
-            .output(self._file_path.name, vcodec='libx265', crf=23, preset='medium', pix_fmt='yuv420p') \
+            .output(str(self._cache_path), vcodec='libx264', crf=23, preset='medium', pix_fmt='yuv420p') \
             .overwrite_output() \
             .global_args('-loglevel', 'error') \
             .global_args('-y') \
@@ -474,11 +485,11 @@ class FileVideoRepo(VideoRepo):
 
         self._writer.wait()
 
-        output_path = self.base_dir / f"{id}{FileVideoRepo.DEFAULT_EXT}"
+        output_path = self.base_dir / f"{id}{self._file_ext}"
 
         # Rename
         if id is not None:
-            os.replace(self._file_path, output_path)
+            os.replace(self._cache_path, output_path)
 
     def Copy(self):
         return FileVideoRepo(base_dir=self.base_dir, resolution=self.resolution, fps=self.fps, overwrite=self.overwrite)

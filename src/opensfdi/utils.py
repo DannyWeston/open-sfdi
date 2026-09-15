@@ -72,10 +72,10 @@ class ProcessingContext:
 class SerialisableMixin:
     _type_registry: ClassVar[dict] = {}
     
-    def __init_subclass__(cls):
+    def __init_subclass__(cls, **kwargs):
         cls._type_registry[cls.__name__] = cls
         
-        super().__init_subclass__()
+        super().__init_subclass__(**kwargs)
     
     def to_dict(self) -> dict:
         """Convert to dict, excluding specified fields"""
@@ -115,6 +115,8 @@ class SerialisableMixin:
     @classmethod
     def from_dict(cls, data: dict) -> object:
         """Create object from dict"""
+        data = dict(data)
+
         type_name = data.pop('__type__')
 
         subclass = cls._type_registry[type_name]
@@ -132,25 +134,6 @@ class SerialisableMixin:
             vars[key] = value
 
         return subclass(**vars)
-
-# class CallbackProtocol(Protocol):
-#     def __call__(self, *args: Any, **kwargs: Any) -> None:
-#         ...
-
-# @dataclass
-# class EventEmitter:
-#     _callbacks: list[CallbackProtocol] = None
-    
-#     def __post_init__(self):
-#         self._callbacks = []
-    
-#     def on_trigger(self, callback: CallbackProtocol):
-#         self._callbacks.append(callback)
-    
-#     def trigger(self, *args, **kwargs):
-#         for cb in self._callbacks:
-#             cb(*args, **kwargs)
-
 
 def TransMat(R, T):
     M = np.eye(4, 4)

@@ -332,11 +332,13 @@ class Projector(ch.ICharable, ProjectorBackend):
             
             self._notify_char_listeners(value)
 
-    def characterise(self, board, poi_coords, flags=0):
+    def characterise(self, board, poi_coords, hint: ch.ZhangCharHint, extra_flags=0):
         resolution = self.get_settings().resolution
 
-        char = self.get_char()
-        char.execute(board, poi_coords, resolution, flags)
+        char = ch.ZhangChar.characterise(
+            board, poi_coords, resolution,
+            hint, extra_flags
+        )
 
         self.set_char(char)
 

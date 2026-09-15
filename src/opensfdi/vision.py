@@ -56,8 +56,8 @@ class StereoMeasurementSettings:
 class StereoMeasurement:
     def __init__(self, left_camera: camera.Camera, right_camera: camera.Camera):
 
-        if left_camera.char is None: raise ch.NotCharacterisedException("The left camera is not characterised!")
-        if right_camera.char is None: raise ch.NotCharacterisedException("The right camera is not characterised!")
+        if left_camera.get_char() is None: raise ch.NotCharacterisedException("The left camera is not characterised!")
+        if right_camera.get_char() is None: raise ch.NotCharacterisedException("The right camera is not characterised!")
         
         self._left_camera = left_camera
         self._right_camera = right_camera

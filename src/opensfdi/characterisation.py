@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 
 import numpy as np
 import cv2
@@ -336,6 +337,15 @@ class CircleBoard(CharacterisationBoard):
 
 # Characterisation
 
+@dataclass(frozen=True)
+class ZhangCharHint:
+    sensor_size_mm: tuple[float, float]     # mm
+    focal_length_mm: tuple[float, float]    # mm
+    optical_centre: tuple[float, float]     # 0 to 1
+
+    distort_mat: np.ndarray                 # 5 values
+
+@dataclass(frozen=True)
 class ZhangChar(utils.SerialisableMixin):
     # Rotation and Translation are the transformation from the characterisation board's frame to the camera frame.
     # The first pose (Oxyz1) is used to determine the camera offset from the board along with the Rotation (R) and Translation (T):
@@ -346,97 +356,133 @@ class ZhangChar(utils.SerialisableMixin):
     # Oxyz_i =  (R_i   T_i) . Oxyz1 {i -> 0 .. poses used}
     #           (0     1)
 
-    def __init__(self, rotation=None, translation=None, 
-            intrinsic_mat=None, distort_mat=None, reproj_errs=None,
-            sensor_size=None, focal_length=None, optical_centre=None,
-            rotation_to_other=None, translation_to_other=None,
-            resolution=None, pose_poi_coords=None, board_poses=None,
-        ):
+    intrinsic_mat: np.ndarray
+    extrinsic: np.ndarray
+    distortion_mat: np.ndarray
 
-        xp = utils.ProcessingContext().xp
+    resolution: tuple[int, int]
 
-        self._rotation = rotation
-        self._translation = translation
+    pose_pois: np.ndarray
+    pose_transforms: np.ndarray # First transform is assumed 0, 0, 0
 
+    reproj_errs: np.ndarray
 
-        self._intrinsic_mat = intrinsic_mat
-        
-        if distort_mat is None:
-            self._distort_mat = xp.zeros(shape=(5,), dtype=xp.float32)
-        else:
-            self._distort_mat = distort_mat
+    @staticmethod
+    def characterise(board: CharacterisationBoard, poi_coords, resolution, hint: ZhangCharHint=None, extraFlags=None):
+        w, h = resolution
 
-        self._reproj_errs = reproj_errs
+        with utils.ProcessingContext.UseGPU(False):
+            xp = utils.ProcessingContext().xp
 
-        self._resolution = resolution
+            board_coords = utils.ToContext(xp, board.get_poi_coords())
 
-        self._pose_poi_coords = pose_poi_coords
+            objectCoords = xp.repeat(board_coords[xp.newaxis, ...], len(poi_coords), axis=0)
 
-        self._pose_rotations = None
-        self._pose_translations = None
+            poi_coords = utils.ToContext(xp, poi_coords)
 
-        self._rotation_to_other = rotation_to_other
-        self._translation_to_other = translation_to_other
+            flags = 0
 
-        self._board_poses = board_poses
+            if extraFlags: flags |= extraFlags
 
-        self._focal_length = focal_length
-        self._sensor_size = sensor_size
-        self._optical_centre = optical_centre
+            # Check if an initial guess can be made
+            if hint is not None:
+                flags |= cv2.CALIB_USE_INTRINSIC_GUESS
 
-    @property
-    def exclude_fields(self):
-        return super().exclude_fields.union({'_pose_translations', '_pose_rotations'})
+                fx, fy = hint.focal_length_mm
+                sx, sy = hint.sensor_size_mm
+                ox, oy = hint.optical_centre
 
-    @property
-    def rotation(self):
-        return self._rotation
+                distort_hint = hint.distort_mat
+
+                hint_intrinsic = xp.array([
+                    [(w * fx) / sx, 0.0, (w - 1) * ox],
+                    [0.0, (h * fy) / sy, (h - 1) * oy],
+                    [0.0, 0.0, 1.0]
+                ], dtype=xp.float32)
+            
+            else: 
+                hint_intrinsic = None
+                distort_hint = None
+
+            _, intrinsic_mat, distort_mat, pose_rotations, pose_translations = cv2.calibrateCamera(
+                objectCoords, poi_coords, (w, h), hint_intrinsic, utils.ToContext(xp, distort_hint), flags=flags
+            )
+
+            pose_rotations = utils.ToContext(pose_rotations)
+            pose_translations = xp.asarray(pose_translations)
+
+            reproj_errs = ZhangChar._calc_reproj_errs(
+                objectCoords, poi_coords,
+                intrinsic_mat, distort_mat, 
+                pose_rotations, pose_translations
+            ).flatten()
+
+            base_rotation = cv2.Rodrigues(pose_rotations[0])[0]
+            base_translation = pose_translations[0].squeeze()
+
+            resolution = resolution
+            pose_poi_coords = poi_coords
+
+            M0 = utils.TransMat(base_rotation, base_translation)
+
+            boardPoses = [xp.eye(4, 4)]
+            for i in range(1, len(objectCoords)):
+                Mi = utils.TransMat(cv2.Rodrigues(pose_rotations[i])[0], pose_translations[i].squeeze())
+                boardPoses.append(xp.linalg.inv(Mi) @ M0)
+
+            board_poses = xp.asarray(boardPoses)
+
+        return ZhangChar(
+            intrinsic_mat=intrinsic_mat,
+            distortion_mat=distort_mat,
+            resolution=resolution,
+            pose_pois=pose_poi_coords,
+            pose_transforms=board_poses,
+            reproj_errs=reproj_errs
+        )
     
     @property
-    def translation(self):
-        return self._translation
-    
-    @property
-    def intrinsic_mat(self):
-        return self._intrinsic_mat
-    
-    @property
-    def distort_mat(self):
-        return self._distort_mat
-    
-    @property
-    def reproj_errs(self):
-        return self._reproj_errs
-    
-    @property
-    def resolution(self):
-        return self._resolution
-    
-    @property
-    def pose_poi_coords(self):
-        return self._pose_poi_coords
-    
-    @property
-    def board_poses(self):
-        return self._board_poses
-    
-    @property
-    def focal_length(self):
-        return self._focal_length
-    
-    @property
-    def sensor_size(self):
-        return self._sensor_size
-    
-    @property
-    def optical_centre(self):
-        return self._optical_centre
+    def projection_mat(self):
+        with utils.ProcessingContext.UseGPU(False):
+            xp = utils.ProcessingContext().xp
+
+            intrinsic = utils.ToContext(xp, self.intrinsic_mat)
+            extrinsic = utils.ToContext(xp, self.extrinsic)
+
+            return xp.dot(intrinsic, extrinsic)
 
     @property
-    def extrinsic_mat(self):
-        xp = utils.ProcessingContext().xp
-        temp = xp.asarray(self.translation)
-        return xp.concatenate([xp.asarray(self.rotation), temp[:, xp.newaxis]], axis=1)
+    def rms_reproj_err(self):
+        with utils.ProcessingContext.UseGPU(False):
+            xp = utils.ProcessingContext().xp
+
+            reproj_errs = utils.ToContext(xp, self.reproj_errs)
+
+            return xp.sqrt(xp.mean(reproj_errs ** 2))
+
+    @staticmethod
+    def _calc_reproj_errs(obj_coords, poi_coords, intrinsic_mat, dist_mat, rotations, translations):
+        with utils.ProcessingContext.UseGPU(False):
+            xp = utils.ProcessingContext().xp
+
+            reprojErrors = xp.empty(shape=poi_coords.shape[:2], dtype=xp.float32)
+            
+            for i in range(len(obj_coords)):
+                projected_points, _ = cv2.projectPoints(obj_coords[i], rotations[i], translations[i], intrinsic_mat, dist_mat)
+                
+                # Calculate Euclidean distance for each point
+                # TODO: Long hand version as not sure if cupy has it
+                errors = xp.linalg.norm(projected_points.squeeze() - poi_coords[i], axis=1).flatten()
+
+                reprojErrors[i] = errors
+
+            return xp.asarray(reprojErrors)
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        data = dict(data)
+
+        return cls(**data)
     
     # def fov(self, resolution):
     #     xp = utils.ProcessingContext().xp
@@ -454,94 +500,6 @@ class ZhangChar(utils.SerialisableMixin):
     #         2 * xp.arctan2(w, 2 * fx),
     #         2 * xp.arctan2(h, 2 * fy),
     #     )
-
-    @property
-    def rotation_to_other(self):
-        return self._rotation_to_other
-    
-    @property
-    def translation_to_other(self):
-        return self._translation_to_other
-
-    @property
-    def projection_mat(self):
-        xp = utils.ProcessingContext().xp
-        return xp.dot(xp.asarray(self.intrinsic_mat), self.extrinsic_mat)
-
-    @property
-    def is_characterised(self):
-        return  (self.intrinsic_mat is not None) \
-                and (self.distort_mat is not None) \
-                and (self.board_poses is not None)
-
-    @property
-    def reprojection_err(self):
-        if self._reproj_errs is None: return
-        
-        xp = utils.ProcessingContext().xp
-
-        return xp.sqrt(xp.mean(self._reproj_errs ** 2))
-
-    def execute(self, board: CharacterisationBoard, poi_coords, resolution, extraFlags=None):
-        w, h = resolution
-
-        with utils.ProcessingContext.UseGPU(False):
-            xp = utils.ProcessingContext().xp
-
-            board_coords = utils.ToContext(xp, board.get_poi_coords())
-
-            objectCoords = xp.repeat(board_coords[xp.newaxis, ...], len(poi_coords), axis=0)
-
-            poi_coords = utils.ToContext(xp, poi_coords)
-
-            flags = 0
-
-            if extraFlags: flags |= extraFlags
-
-            # Check if an initial guess can be made
-            if self.sensor_size and self.focal_length and self.optical_centre:
-                flags |= cv2.CALIB_USE_INTRINSIC_GUESS
-
-                fx, fy = self.focal_length
-                sx, sy = self.sensor_size
-                ox, oy = self.optical_centre
-
-                kGuess = np.array([
-                    [(w * fx) / sx, 0.0, (w - 1) * ox],
-                    [0.0, (h * fy) / sy, (h - 1) * oy],
-                    [0.0, 0.0, 1.0]
-                ], dtype=xp.float32)
-            
-            else: kGuess = None
-
-            _, self._intrinsic_mat, self._distort_mat, self._pose_rotations, self._pose_translations = cv2.calibrateCamera(
-                objectCoords, poi_coords, (w, h), kGuess, utils.ToContext(xp, self.distort_mat), flags=flags
-            )
-
-            self._pose_rotations = xp.asarray(self._pose_rotations)
-            self._pose_translations = xp.asarray(self._pose_translations)
-
-            self._reproj_errs = self.calc_reproj_errs(objectCoords, poi_coords,
-                self.intrinsic_mat, self.distort_mat, self._pose_rotations, self._pose_translations)
-            
-            self._reproj_errs = self._reproj_errs.flatten()
-
-            self._rotation = cv2.Rodrigues(self._pose_rotations[0])[0]
-            self._translation = self._pose_translations[0].squeeze()
-
-            self._resolution = resolution
-            self._pose_poi_coords = poi_coords
-
-            M0 = utils.TransMat(self.rotation, self.translation)
-
-            boardPoses = [xp.eye(4, 4)]
-            for i in range(1, len(objectCoords)):
-                Mi = utils.TransMat(cv2.Rodrigues(self._pose_rotations[i])[0], self._pose_translations[i].squeeze())
-                boardPoses.append(xp.linalg.inv(Mi) @ M0)
-
-            self._board_poses = xp.asarray(boardPoses)
-
-        return self._reproj_errs
 
     def undistort_img(self, img_data):
         with utils.ProcessingContext.UseGPU(False):
@@ -590,19 +548,6 @@ class ZhangChar(utils.SerialisableMixin):
 
             return joint_rms_reproj
 
-    def calc_reproj_errs(self, obj_coords, poi_coords, intrinsic_mat, dist_mat, rotations, translations):
-        reprojErrors = np.empty(shape=poi_coords.shape[:2], dtype=np.float32)
-        
-        for i in range(len(obj_coords)):
-            projected_points, _ = cv2.projectPoints(obj_coords[i], rotations[i], translations[i], intrinsic_mat, dist_mat)
-            
-            # Calculate Euclidean distance for each point
-            errors = np.linalg.norm(projected_points.squeeze() - poi_coords[i], axis=1).flatten()
-
-            reprojErrors[i] = errors
-
-        return np.asarray(reprojErrors)
-    
     def __str__(self):
         xp = utils.ProcessingContext().xp
 
@@ -613,15 +558,11 @@ class ZhangChar(utils.SerialisableMixin):
             v += f' Reprojection Error: {reproj_rms:.4f}'
 
         return v
-    
+
 
 # Interfaces
 
 class ICharable(ABC):
     @abstractmethod
     def get_char(self):
-        raise NotImplementedError
-
-    @abstractmethod
-    def characterise(self, board: Checkerboard, coords, flags:int=0):
         raise NotImplementedError

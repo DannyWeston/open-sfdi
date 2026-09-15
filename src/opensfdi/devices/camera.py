@@ -28,10 +28,22 @@ class CameraSettings(DeviceSettings):
     focus: float = -1                           # -1 = autofocus, 0< = lens position
     # gain: Optional[float] = 1.0               # None = Not applicable, -1 = autofocus
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "CameraSettings":
+        data = dict(data)
+
+        return cls(**data)
+
 @dataclass(frozen=True)
 class OpenCVCameraSettings(CameraSettings):
     device_id: int = 0
     buffer_size: int = 1
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "CameraSettings":
+        data = dict(data)
+
+        return cls(**data)
 
 @dataclass(frozen=True)
 class PiCameraSettings(CameraSettings):
@@ -43,7 +55,6 @@ class FileCameraSettings(CameraSettings):
     loop: bool = False
 
 # Backends
-
 class CameraBackend(DeviceBackend):
     def __init__(self, settings: CameraSettings):
         super().__init__(settings)
@@ -397,7 +408,7 @@ class Camera(ch.ICharable):
     def __init__(self, backend: CameraBackend, char:ch.ZhangChar=None):
         self._backend = backend
 
-        self._char = ch.ZhangChar() if (char is None) else char
+        self._char = char
         
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -434,11 +445,13 @@ class Camera(ch.ICharable):
 
         self._notify_char_listeners(value)
 
-    def characterise(self, board, poi_coords, flags=0):
+    def characterise(self, board, poi_coords, hint: ch.ZhangCharHint, extra_flags=0):
         resolution = self.get_settings().resolution
 
-        char = self.get_char()
-        char.execute(board, poi_coords, resolution, flags)
+        char = ch.ZhangChar.characterise(
+            board, poi_coords, resolution,
+            hint, extra_flags
+        )
 
         self.set_char(char)
 
@@ -610,8 +623,15 @@ class Camera(ch.ICharable):
         char = self.get_char()
 
         v = "<Camera>"
-        v += f" {char}" if char.is_characterised else " (Not Characterised)"
+        v += f" {char}" if char else " (Not Characterised)"
         return v
+
+class CameraSerialiser:
+    def __init__(self):
+        pass
+
+    def from_dict(self, data: dict):
+        return 
 
 class CameraFactory:
     @staticmethod
