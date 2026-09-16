@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import numpy as np
 import cv2
 
+import json_numpy
+
 from abc import ABC, abstractmethod
 from . import image, utils
 
@@ -357,7 +359,7 @@ class ZhangChar(utils.SerialisableMixin):
     #           (0     1)
 
     intrinsic_mat: np.ndarray
-    extrinsic: np.ndarray
+    extrinsic_mat: np.ndarray
     distortion_mat: np.ndarray
 
     resolution: tuple[int, int]
@@ -447,7 +449,7 @@ class ZhangChar(utils.SerialisableMixin):
             xp = utils.ProcessingContext().xp
 
             intrinsic = utils.ToContext(xp, self.intrinsic_mat)
-            extrinsic = utils.ToContext(xp, self.extrinsic)
+            extrinsic = utils.ToContext(xp, self.extrinsic_mat)
 
             return xp.dot(intrinsic, extrinsic)
 
@@ -549,18 +551,30 @@ class ZhangChar(utils.SerialisableMixin):
             return joint_rms_reproj
 
     def __str__(self):
-        xp = utils.ProcessingContext().xp
-
-        v = f'<Char>'
-
-        if self.reproj_errs is not None:
-            reproj_rms = xp.sqrt(xp.mean(xp.power(self._reproj_errs, 2)))
-            v += f' Reprojection Error: {reproj_rms:.4f}'
-
-        return v
-
+        return f'<Char> Reprojection Error: {self.rms_reproj_err:.4f}'
 
 # Interfaces
+
+class CharSerialiser:
+    def __init__(self):
+        pass
+
+    def to_dict(self, char: ZhangChar) -> dict:
+        return {
+            "intrinsic_mat": json_numpy.dumps(char.intrinsic_mat),
+            "extrinsic": json_numpy.dumps(char.extrinsic_mat),
+            "distortion_mat": json_numpy.dumps(char.distortion_mat), 
+            "resolution": char.resolution,
+            "pose_pois": json_numpy.dumps(char.pose_pois),
+            "pose_transforms": json_numpy.dumps(char.pose_transforms),
+            "reproj_errs": json_numpy.dumps(char.reproj_errs),
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        data = dict(data)
+
+        return cls(**data)
 
 class ICharable(ABC):
     @abstractmethod

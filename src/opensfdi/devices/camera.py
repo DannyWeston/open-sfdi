@@ -28,22 +28,10 @@ class CameraSettings(DeviceSettings):
     focus: float = -1                           # -1 = autofocus, 0< = lens position
     # gain: Optional[float] = 1.0               # None = Not applicable, -1 = autofocus
 
-    @classmethod
-    def from_dict(cls, data: dict) -> "CameraSettings":
-        data = dict(data)
-
-        return cls(**data)
-
 @dataclass(frozen=True)
 class OpenCVCameraSettings(CameraSettings):
     device_id: int = 0
     buffer_size: int = 1
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "CameraSettings":
-        data = dict(data)
-
-        return cls(**data)
 
 @dataclass(frozen=True)
 class PiCameraSettings(CameraSettings):
@@ -77,7 +65,7 @@ class CameraBackend(DeviceBackend):
     def set_settings(self, settings: CameraSettings) -> CameraSettings:
         return super().set_settings(settings)
     
-    def get_source(self):
+    def get_source(self) -> "CameraSource":
         raise NotImplementedError
 
     @abstractmethod
@@ -626,38 +614,92 @@ class Camera(ch.ICharable):
         v += f" {char}" if char else " (Not Characterised)"
         return v
 
-class CameraSerialiser:
-    def __init__(self):
-        pass
+class CameraSerialiser: 
+    def __init__(self, char_serialiser=ch.CharSerialiser()):
+        self._char_serialiser = char_serialiser
 
-    def from_dict(self, data: dict):
-        return 
+    # Serialisation
+
+    def camera_to_dict(self, camera: Camera) -> dict:
+        data = {
+            "__type__" : "camera",
+            "backend" : self.backend_to_dict(camera.get_backend())
+        }
+
+        char = camera.get_char()
+        if char: data["characterisation"] = self._char_serialiser.to_dict(char)
+
+        return data
+
+    def backend_to_dict(self, backend: CameraBackend):
+        settings = backend.get_settings()
+        source = backend.get_source()
+
+        data = {
+            "__type__": source.name,
+            "resolution": list(settings.resolution),
+            "refresh_rate": settings.refresh_rate,
+            "exposure_ms": settings.exposure_ms,
+            "focus": settings.focus,
+        }
+
+        match source:
+            case CameraSource.opencv:
+                data["device_id"] = settings.device_id
+                data["buffer_size"] = settings.buffer_size
+
+            case CameraSource.picamera:
+                data["device_id"] = settings.device_id
+
+        return data
+
+
+    # Deserialisation
+
+    def dict_to_camera(self, data: dict) -> "Camera":
+        data = dict(data)
+
+        if "__type__" not in data: raise Exception("Could not identify object type!")
+        if data["__type__"] != "camera": raise Exception("Dict is not for a camera!")
+        del data["__type__"]
+
+        if "backend" not in data: raise Exception("Camera does not contain settings!")
+        backend = self.dict_to_backend(data["backend"])
+        del data["backend"]
+
+        if "characterisation" in data:
+            char = self._char_serialiser.from_dict(data["characterisation"])
+            del data["characterisation"]
+        else: char = None
+
+        return Camera(backend, char)
+        
+    def dict_to_backend(self, data: dict) -> "CameraBackend":
+        data = dict(data)
+        
+        if "__type__" not in data: raise Exception("Could not identify backend type!")
+        backend_type = CameraSource[data["__type__"]]
+        del data["__type__"]
+
+        return CameraFactory.make_backend(backend_type, data)
 
 class CameraFactory:
     @staticmethod
-    def make_camera(source, settings: CameraSettings=None, char: ch.ZhangChar=None):
-        match source:
-            case CameraSource.opencv:
-                backend = OpenCVCameraBackend(settings)
-
-            case CameraSource.picamera:
-                backend = PiCameraBackend(settings)
-
-            case CameraSource.filebased:
-                backend = FileCameraBackend(settings)
+    def make_camera(source, params: CameraSettings=None, char: ch.ZhangChar=None):
+        backend = CameraFactory.make_backend(source, params)
 
         return Camera(backend, char)
 
     @staticmethod
-    def make_settings(source, params):
+    def make_backend(source, params):
         match source:
             case CameraSource.opencv:
-                return OpenCVCameraSettings(**params)
+                return OpenCVCameraBackend(OpenCVCameraSettings(**params))
 
             case CameraSource.picamera:
-                return PiCameraSettings(**params)
+                return PiCameraBackend(PiCameraSettings(**params))
 
             case CameraSource.filebased:
-                return FileCameraSettings(**params)
+                return FileCameraBackend(FileCameraSettings(**params))
 
         return None

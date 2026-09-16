@@ -19,9 +19,6 @@ from ..image import FileImage, Image, ToInt
 
 # Repositories
 
-APP_DIRS = platformdirs.PlatformDirs("dan3d")
-APP_DIRS.ensure_exists = True
-
 class IRepository(ABC):
     @abstractmethod
     def Get(self, id):
@@ -39,21 +36,13 @@ class IRepository(ABC):
     def Update(self, id, **kwargs) -> bool:
         raise NotImplementedError
 
-T = TypeVar('T')
-class JSONRepository(IRepository, Generic[T]):
-    def __init__(self, base_dir:Path=None, overwrite=True):
+class JSONRepository(IRepository):
+    def __init__(self, base_dir:Path, overwrite=True):
         super().__init__()
 
         self._overwrite = overwrite
 
-        if base_dir:
-            base_dir.mkdir(exist_ok=True, parents=True)
-
-            if not self._is_dir_writable(base_dir):
-                raise PermissionError(f"No write permissions to {base_dir.absolute()}")
-            
-            self._base_dir = base_dir
-        else: self._base_dir = APP_DIRS.user_data_path
+        self._base_dir = base_dir
 
     @property
     def overwrite(self):
@@ -63,13 +52,6 @@ class JSONRepository(IRepository, Generic[T]):
     def base_dir(self) -> Path:
         return self._base_dir
 
-    def _is_dir_writable(self, path: Path) -> bool:
-        if not path.exists():
-            path = path.parent
-        
-        # Check write permission
-        return os.access(path, os.W_OK)
-        
     def GetIDs(self):
         filenames = list(self.base_dir.glob(f'*.json'))
 
@@ -83,47 +65,37 @@ class JSONRepository(IRepository, Generic[T]):
 
         return ids
 
-    def Get(self, id: str) -> utils.SerialisableMixin:
-        if self.base_dir: path = Path(self.base_dir / f"{id}.json")
-        else: path = Path(f"{id}.json")
+    def Get(self, id: str) -> dict:
+        path = Path(self.base_dir / f"{id}.json")
 
         if not path.exists():
             raise Exception(f"{id} could not be found in {self.base_dir.absolute()}")
         
-        with open(path, "r") as jsonFile:
-            # Convert json to entity
-            raw_json = json_numpy.load(jsonFile)
-            return self._json_to_entity(raw_json)
+        with open(path, "r") as json_file:
+            raw_json = json_numpy.load(json_file)
+            return raw_json
         
-        raise Exception(f"Could not construct {T.__class__.__name__}")
+        raise Exception(f"Could not find json")
 
-    def Add(self, entity: T, id: str) -> None:
-        if self.base_dir: path = self.base_dir / f"{id}.json"
-        else: path = Path(f"{id}.json")
+    def Add(self, data: dict, id: str) -> None:
+        path = Path(self.base_dir / f"{id}.json")
 
         if path.exists() and (not self.overwrite):
             raise Exception(f"{id} already exists and cannot be saved (overwriting disabled)")
 
         # Save metadata
-        with open(path, "w") as jsonFile:
-            # Convert entity to jsons
-            raw_json = self._entity_to_json(entity)
+        with open(path, "w") as json_file:
+            return json_numpy.dump(data, json_file, indent=4)
 
-            json_numpy.dumps
+        raise Exception(f"Could not find json")
 
     def Delete(self, id: str) -> bool:
         # TODO: Implement
         pass
 
-    def Update(self, entity: T) -> bool:
+    def Update(self, data: dict) -> bool:
         # TODO: Implement
         pass
-
-    def _json_to_entity(self, json) -> T:
-        raise NotImplementedError
-
-    def _entity_to_json(self, entity: T) -> dict:
-        raise NotImplementedError
 
 # Pointcloud Repository
 class PointCloudRepo(IRepository):
@@ -248,10 +220,6 @@ class ImageRepo(IRepository):
         self._overwrite = overwrite
 
     @property
-    def supported_file_types(self):
-        raise NotImplementedError
-
-    @property
     def overwrite(self):
         return self._overwrite
 
@@ -268,25 +236,19 @@ class ImageRepo(IRepository):
         raise NotImplementedError
 
 class FileImageRepo(ImageRepo):
-    DEFAULT_EXT = "bmp"
     DEFAULT_DIR = Path(platformdirs.user_pictures_path())
-    TEMP_DIR = APP_DIRS.user_cache_path
+    SUPPORTED_FILE_EXTS = [
+        ".bmp",
+        ".tif",
+        ".jpg",
+        ".jpeg",
+        ".png"
+    ]
 
-    def __init__(self, base_dir:Path=None, overwrite=True, file_ext:str="bmp"):
+    def __init__(self, base_dir:Path=None, overwrite=True):
         super().__init__(overwrite=overwrite)
         
-        if file_ext not in self.supported_file_types:
-            raise Exception(f"File type {file_ext} not supported")
-        
-        self._file_ext = file_ext
-
-        if base_dir is None: self._base_dir = FileImageRepo.DEFAULT_DIR
-        else: self._base_dir = base_dir
-
-        self._base_dir.mkdir(exist_ok=True)
-
-        if not self._is_dir_writable(self._base_dir):
-            raise PermissionError(f"No write permissions to {base_dir.absolute()}")
+        self._base_dir = base_dir if base_dir else FileImageRepo.DEFAULT_DIR
 
     @property
     def base_dir(self) -> Path:
@@ -303,17 +265,6 @@ class FileImageRepo(ImageRepo):
 
         self._base_dir = value
 
-    @property
-    def file_ext(self):
-        return self._file_ext
-    
-    @file_ext.setter
-    def file_ext(self, value: str):
-        if value not in self.supported_file_types:
-            raise Exception(f"File type {value} not supported")
-
-        self._file_ext = value
-
     def _is_dir_writable(self, path: Path) -> bool:
         path = Path(path)
         
@@ -323,22 +274,12 @@ class FileImageRepo(ImageRepo):
         # Check write permission
         return os.access(path, os.W_OK)
 
-    @property
-    def supported_file_types(self):
-        return [
-            "tif",
-            "tiff",
-            "bmp",
-            "jpg",
-            "jpeg",
-            "png"
-        ]
-
-    def Add(self, img: Image, id: str):
+    def Add(self, img: Image, id: str, file_ext:str="bmp"):
         ''' Save an image to a repository '''
-        file = f"{id}.{self.file_ext}"
-        if self.base_dir: path = Path(self.base_dir / file)
-        else: path = Path(file)
+        if file_ext not in self.SUPPORTED_FILE_EXTS:
+            raise Exception(f"File type {file_ext} not supported")
+
+        path = self.base_dir / f"{id}{file_ext}"
 
         if path.exists() and (not self.overwrite):
             raise FileExistsError(f"Image at {path} already exists (overwriting disabled)")
@@ -346,16 +287,19 @@ class FileImageRepo(ImageRepo):
         # Save as float to disk
         cv2.imwrite(str(path.resolve()), ToInt(img.raw_data))
 
-    def Get(self, id: str) -> FileImage:
-        path = Path(self.base_dir / f"{id}.{self.file_ext}")
+    def Get(self, id: str, file_ext=str) -> FileImage:
+        path = Path(self.base_dir / f"{id}{file_ext}")
+
+        if file_ext not in self.SUPPORTED_FILE_EXTS:
+            raise Exception(f"File type {file_ext} not supported")
 
         if not path.exists():
             raise FileNotFoundError(f"Could not find image '{id}'")
 
         return FileImage(Path(path))
 
-    def Delete(self, id) -> bool:
-        file = f"{id}.{self.file_ext}"
+    def Delete(self, id, file_ext=str) -> bool:
+        file = f"{id}{file_ext}"
         if self.base_dir: path = Path(self.base_dir / file)
         else: path = Path(file)
 
@@ -366,7 +310,6 @@ class FileImageRepo(ImageRepo):
 
     def Update(self, id, **kwargs) -> bool:
         raise NotImplementedError
-
 
 # Video Repository
 
@@ -393,7 +336,7 @@ class VideoRepo(IRepository):
 class FileVideoRepo(VideoRepo):
     DEFAULT_EXT = ".mp4"
     DEFAULT_DIR = Path(platformdirs.user_videos_dir())
-    TEMP_DIR = APP_DIRS.user_cache_path
+    TEMP_DIR = Path(platformdirs.user_videos_dir())
 
     SUPPORTED_EXTENSIONS = [
         ".mp4", 
